@@ -7,13 +7,14 @@ mod tab_container;
 mod tab_contents;
 // mod data_import;
 mod context_menu_tree;
-mod app_view;
 mod storage;
 mod connection_store;
 
 mod themes;
 mod onehup_app;
-
+mod home;
+mod database_tab;
+mod setting_tab;
 
 use gpui::*;
 use gpui_component::Root;

@@ -5,7 +5,7 @@ use gpui::{
 };
 use gpui::prelude::FluentBuilder;
 use gpui_component::{
-    v_flex, IconName, Size,
+    IconName, Size,
 };
 use std::any::Any;
 use std::sync::Arc;
@@ -371,14 +371,17 @@ impl TabContainer {
     pub fn render_tab_bar_only(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let view = cx.entity();
 
-        // Custom tab bar with dark background
+        // 深色标签栏
         div()
             .w_full()
-            .h(px(44.0))
+            .h(px(40.0))
+            .bg(gpui::rgb(0x2d2d2d))
             .flex()
             .items_center()
             .px_2()
             .gap_1()
+            .border_b_1()
+            .border_color(gpui::rgb(0x1e1e1e))
             .children(self.tabs.iter().enumerate().map(|(idx, tab)| {
                 let is_active = idx == self.active_index;
                 let closeable = tab.content.closeable();
@@ -391,10 +394,10 @@ impl TabContainer {
                     .px_3()
                     .rounded(px(6.0))
                     .when(is_active, |div| {
-                        div.bg(gpui::rgb(0x4a4a4a)) // 活动标签背景
+                        div.bg(gpui::rgb(0x4a4a4a))
                     })
                     .when(!is_active, |div| {
-                        div.hover(|style| style.bg(gpui::rgb(0x3a3a3a))) // 悬停效果
+                        div.hover(|style| style.bg(gpui::rgb(0x3a3a3a)))
                     })
                     .cursor_pointer()
                     .on_mouse_down(MouseButton::Left, {
@@ -410,22 +413,6 @@ impl TabContainer {
                             .flex()
                             .items_center()
                             .gap_2()
-                            .child(
-                                // 图标
-                                div()
-                                    .when_some(tab.content.icon(), |element, _icon| {
-                                        element.child(
-                                            div()
-                                                .w(px(16.0))
-                                                .h(px(16.0))
-                                                .flex()
-                                                .items_center()
-                                                .justify_center()
-                                                .text_color(gpui::white())
-                                                .child("📁") // 临时使用 emoji，实际应该使用图标
-                                        )
-                                    })
-                            )
                             .child(
                                 // 标签文字
                                 div()
@@ -464,25 +451,6 @@ impl TabContainer {
                             })
                     )
             }))
-            .child(
-                // 添加新标签按钮
-                div()
-                    .ml_2()
-                    .w(px(32.0))
-                    .h(px(32.0))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .rounded(px(6.0))
-                    .cursor_pointer()
-                    .text_color(gpui::rgb(0xaaaaaa))
-                    .hover(|style| {
-                        style
-                            .bg(gpui::rgb(0x3a3a3a))
-                            .text_color(gpui::white())
-                    })
-                    .child("+")
-            )
     }
 }
 

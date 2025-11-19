@@ -1,13 +1,16 @@
-use gpui::{div, App, Context, IntoElement, KeyBinding, ParentElement, Render, Styled, Window, InteractiveElement, Hsla, px, FontWeight, prelude::FluentBuilder, AnyElement, SharedString, Entity, AppContext, StatefulInteractiveElement};
-use gpui_component::{ActiveTheme, IconName, Selectable, button::Button, h_flex, v_flex, StyledExt};
-use gpui_component::dock::{ClosePanel, ToggleZoom};
-use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::util::SubscriberInitExt;
+use crate::connection_store::ConnectionStore;
+use crate::home::HomeTabContent;
+use crate::setting_tab::SettingsTabContent;
+use crate::tab_container::{TabContainer, TabContentType, TabItem};
 use crate::themes;
 use crate::themes::SwitchThemeMode;
+use db::DatabaseType;
+use gpui::{div, prelude::FluentBuilder, px, App, AppContext, Context, Entity, IntoElement, KeyBinding, ParentElement, Render, Styled, Window};
+use gpui_component::dock::{ClosePanel, ToggleZoom};
 use gpui_component::ThemeMode;
-use crate::tab_container::{TabContainer, TabContent, TabContentType, TabItem};
-use std::any::Any;
+use gpui_component::{button::Button, h_flex, v_flex, ActiveTheme, IconName, Selectable};
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 pub fn init(cx: &mut App) {
    
@@ -21,13 +24,6 @@ pub fn init(cx: &mut App) {
 
     gpui_component::init(cx);
     themes::init(cx);
-    // TODO 这里初始化
-
-    // let http_client = std::sync::Arc::new(
-    //     reqwest_client::ReqwestClient::user_agent("gpui-component/story").unwrap(),
-    // );
-    // cx.set_http_client(http_client);
-
     cx.bind_keys(vec![
         KeyBinding::new("shift-escape", ToggleZoom, None),
         KeyBinding::new("ctrl-w", ClosePanel, None),
@@ -44,291 +40,6 @@ pub enum ConnectionType {
     Redis,
     MongoDB,
 }
-
-// 首页内容
-pub struct HomeTabContent {
-    connections: Vec<ConnectionInfo>,
-}
-
-impl HomeTabContent {
-    pub fn new(connections: Vec<ConnectionInfo>) -> Self {
-        Self {
-            connections,
-        }
-    }
-}
-
-impl TabContent for HomeTabContent {
-    fn title(&self) -> SharedString {
-        "首页".into()
-    }
-
-    fn icon(&self) -> Option<IconName> {
-        Some(IconName::File)
-    }
-
-    fn closeable(&self) -> bool {
-        false // 首页不可关闭
-    }
-
-    fn render_content(&self, _window: &mut Window, cx: &mut App) -> AnyElement {
-        let connection_cards: Vec<_> = self.connections.iter().map(|conn| {
-            let icon_bg = match conn.connection_type {
-                ConnectionType::Database => Hsla::blue(),
-                ConnectionType::SshSftp => cx.theme().accent,
-                ConnectionType::Redis => Hsla::red(),
-                ConnectionType::MongoDB => Hsla::green(),
-                _ => cx.theme().accent,
-            };
-
-            div()
-                .p_4()
-                .rounded(px(8.0))
-                .bg(cx.theme().background)
-                .border_1()
-                .border_color(cx.theme().border)
-                .hover(|style| style.border_color(cx.theme().accent))
-                .cursor_pointer()
-                .child(
-                    h_flex()
-                        .items_center()
-                        .gap_3()
-                        .child(
-                            div()
-                                .w(px(40.0))
-                                .h(px(40.0))
-                                .rounded(px(8.0))
-                                .bg(icon_bg)
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .child(
-                                    match conn.connection_type {
-                                        ConnectionType::Database => "DB",
-                                        ConnectionType::SshSftp => "SSH",
-                                        ConnectionType::Redis => "R",
-                                        ConnectionType::MongoDB => "M",
-                                        _ => "?",
-                                    }
-                                )
-                        )
-                        .child(
-                            v_flex()
-                                .flex_1()
-                                .child(
-                                    div()
-                                        .font_weight(FontWeight::SEMIBOLD)
-                                        .child(conn.name.clone())
-                                )
-                                .child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .child(format!("{}, {}", conn.host, conn.status))
-                                )
-                        )
-                )
-        }).collect();
-
-        div()
-            .id("home-content")
-            .size_full()
-            .overflow_scroll()
-            .p_6()
-            .child(
-                div()
-                    .grid()
-                    .grid_cols(3)
-                    .gap_4()
-                    .children(connection_cards)
-            )
-            .into_any_element()
-    }
-
-    fn content_type(&self) -> TabContentType {
-        TabContentType::Custom("home".to_string())
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
-
-// 连接页面内容
-pub struct ConnectionsTabContent {
-    connections: Vec<ConnectionInfo>,
-    selected_filter: ConnectionType,
-}
-
-impl ConnectionsTabContent {
-    pub fn new(connections: Vec<ConnectionInfo>) -> Self {
-        Self {
-            connections,
-            selected_filter: ConnectionType::All,
-        }
-    }
-
-    pub fn set_filter(&mut self, filter: ConnectionType) {
-        self.selected_filter = filter;
-    }
-}
-
-impl TabContent for ConnectionsTabContent {
-    fn title(&self) -> SharedString {
-        "连接".into()
-    }
-
-    fn icon(&self) -> Option<IconName> {
-        Some(IconName::File)
-    }
-
-    fn closeable(&self) -> bool {
-        true
-    }
-
-    fn render_content(&self, _window: &mut Window, cx: &mut App) -> AnyElement {
-        let filtered_connections: Vec<_> = self.connections.iter()
-            .filter(|conn| {
-                self.selected_filter == ConnectionType::All || conn.connection_type == self.selected_filter
-            })
-            .cloned()
-            .collect();
-
-        let connection_cards: Vec<_> = filtered_connections.into_iter().map(|conn| {
-            let icon_bg = match conn.connection_type {
-                ConnectionType::Database => Hsla::blue(),
-                ConnectionType::SshSftp => cx.theme().accent,
-                ConnectionType::Redis => Hsla::red(),
-                ConnectionType::MongoDB => Hsla::green(),
-                _ => cx.theme().accent,
-            };
-
-            div()
-                .p_4()
-                .rounded(px(8.0))
-                .bg(cx.theme().background)
-                .border_1()
-                .border_color(cx.theme().border)
-                .hover(|style| style.border_color(cx.theme().accent))
-                .cursor_pointer()
-                .child(
-                    h_flex()
-                        .items_center()
-                        .gap_3()
-                        .child(
-                            div()
-                                .w(px(40.0))
-                                .h(px(40.0))
-                                .rounded(px(8.0))
-                                .bg(icon_bg)
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .child(
-                                    match conn.connection_type {
-                                        ConnectionType::Database => "DB",
-                                        ConnectionType::SshSftp => "SSH",
-                                        ConnectionType::Redis => "R",
-                                        ConnectionType::MongoDB => "M",
-                                        _ => "?",
-                                    }
-                                )
-                        )
-                        .child(
-                            v_flex()
-                                .flex_1()
-                                .child(
-                                    div()
-                                        .font_weight(FontWeight::SEMIBOLD)
-                                        .child(conn.name.clone())
-                                )
-                                .child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .child(format!("{}, {}", conn.host, conn.status))
-                                )
-                        )
-                )
-        }).collect();
-
-        div()
-            .id("connections-content")
-            .size_full()
-            .overflow_scroll()
-            .p_6()
-            .child(
-                div()
-                    .grid()
-                    .grid_cols(3)
-                    .gap_4()
-                    .children(connection_cards)
-            )
-            .into_any_element()
-    }
-
-    fn content_type(&self) -> TabContentType {
-        TabContentType::Custom("connections".to_string())
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
-
-// 设置页面内容
-pub struct SettingsTabContent;
-
-impl SettingsTabContent {
-    pub fn new() -> Self {
-        Self
-    }
-}
-
-impl TabContent for SettingsTabContent {
-    fn title(&self) -> SharedString {
-        "设置".into()
-    }
-
-    fn icon(&self) -> Option<IconName> {
-        Some(IconName::Settings)
-    }
-
-    fn closeable(&self) -> bool {
-        true
-    }
-
-    fn render_content(&self, _window: &mut Window, cx: &mut App) -> AnyElement {
-        div()
-            .flex_1()
-            .p_6()
-            .child(
-                v_flex()
-                    .gap_4()
-                    .child(
-                        div()
-                            .text_xl()
-                            .font_weight(FontWeight::BOLD)
-                            .child("设置")
-                    )
-                    .child(
-                        div()
-                            .text_color(cx.theme().muted_foreground)
-                            .child("应用程序设置和配置")
-                    )
-            )
-            .into_any_element()
-    }
-
-    fn content_type(&self) -> TabContentType {
-        TabContentType::Custom("settings".to_string())
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
-
 impl ConnectionType {
     fn label(&self) -> &'static str {
         match self {
@@ -356,9 +67,11 @@ pub struct ConnectionInfo {
     pub id: Option<i64>,
     pub name: String,
     pub connection_type: ConnectionType,
+    pub db_type: DatabaseType,
     pub host: String,
     pub port: u16,
     pub username: String,
+    pub password: String,
     pub database: Option<String>,
     pub status: String,
 }
@@ -371,57 +84,35 @@ pub struct OneHupApp {
 
 impl OneHupApp {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let connections = vec![
-                ConnectionInfo {
-                    name: "comiserver 开发 2".to_string(),
-                    connection_type: ConnectionType::SshSftp,
-                    host: "ssh, root, 公网".to_string(),
-                    port: 22,
-                    status: "已连接".to_string(),
-                },
-                ConnectionInfo {
-                    name: "comi一体化".to_string(),
-                    connection_type: ConnectionType::SshSftp,
-                    host: "ssh, root, 公网".to_string(),
-                    port: 22,
-                    status: "已连接".to_string(),
-                },
-                ConnectionInfo {
-                    name: "风雪comi".to_string(),
-                    connection_type: ConnectionType::SshSftp,
-                    host: "ssh, root, 公网".to_string(),
-                    port: 22,
-                    status: "已连接".to_string(),
-                },
-                ConnectionInfo {
-                    name: "A82".to_string(),
-                    connection_type: ConnectionType::Database,
-                    host: "ssh, root, 公网".to_string(),
-                    port: 3306,
-                    status: "已连接".to_string(),
-                },
-                ConnectionInfo {
-                    name: "国产机".to_string(),
-                    connection_type: ConnectionType::Database,
-                    host: "ssh, root, 公网".to_string(),
-                    port: 3306,
-                    status: "已连接".to_string(),
-                },
-                ConnectionInfo {
-                    name: "深圳环境builder".to_string(),
-                    connection_type: ConnectionType::SshSftp,
-                    host: "ssh, root, 公网".to_string(),
-                    port: 22,
-                    status: "已连接".to_string(),
-                },
-            ];
+        // 从存储加载连接
+        let connection_store = ConnectionStore::new().expect("Failed to create connection store");
+        let stored_connections = connection_store.load_connections().unwrap_or_else(|_| vec![]);
+
+        let connections: Vec<ConnectionInfo> = stored_connections.into_iter().map(|stored| {
+            let connection_type = match stored.db_type {
+                DatabaseType::MySQL | DatabaseType::PostgreSQL => ConnectionType::Database,
+            };
+
+            ConnectionInfo {
+                id: stored.id,
+                name: stored.name.clone(),
+                connection_type,
+                db_type: stored.db_type,
+                host: stored.host.clone(),
+                port: stored.port,
+                username: stored.username.clone(),
+                password: stored.password.clone(),
+                database: stored.database.clone(),
+                status: "未连接".to_string(),
+            }
+        }).collect();
 
         // 创建标签容器
         let tab_container = cx.new(|cx| TabContainer::new(window, cx));
 
         // 添加主页标签
         tab_container.update(cx, |tc, cx| {
-            let home_tab = TabItem::new("home", HomeTabContent::new(connections.clone()));
+            let home_tab = TabItem::new("home", HomeTabContent::new(connections.clone(), tab_container.clone()));
             tc.add_and_activate_tab(home_tab, cx);
         });
 
@@ -456,12 +147,16 @@ impl OneHupApp {
         let tab_container = self.tab_container.read(cx);
         if let Some(active_tab) = tab_container.active_tab() {
             let content = active_tab.content().clone();
+            let is_home_tab = active_tab.content().content_type() == TabContentType::Custom("home".to_string());
             let _ = tab_container; // 释放借用
 
             // 主内容区域：垂直布局，包含工具栏和内容
             v_flex()
                 .size_full()
-                .child(self.render_toolbar(window, cx))
+                .when(is_home_tab, |this| {
+                    // 只在主页显示工具栏
+                    this.child(self.render_toolbar(window, cx))
+                })
                 .child(
                     div()
                         .flex_1()
@@ -489,37 +184,10 @@ impl OneHupApp {
                 h_flex()
                     .gap_2()
                     .child(
-                        Button::new("new_host")
+                        Button::new("new_connect")
                             .icon(IconName::Plus)
-                            .label("NEW HOST")
-                    )
-                    .child(
-                        Button::new("terminal")
-                            .icon(IconName::File)
-                            .label("TERMINAL")
-                    )
-                    .child(
-                        Button::new("serial")
-                            .icon(IconName::File)
-                            .label("SERIAL")
-                    )
-            )
-            .child(
-                h_flex()
-                    .gap_2()
-                    .child(Button::new("grid_view").icon(IconName::Menu))
-                    .child(Button::new("list_view").icon(IconName::Menu))
-                    .child(Button::new("settings").icon(IconName::Settings))
-                    .child(
-                        div()
-                            .w(px(32.0))
-                            .h(px(32.0))
-                            .rounded(px(16.0))
-                            .bg(cx.theme().accent)
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .child("T")
+                            .label("NEW CONNECT")
+
                     )
             )
     }
@@ -555,6 +223,7 @@ impl OneHupApp {
                                 .icon(filter_type.icon())
                                 .label(filter_type.label())
                                 .w_full()
+                                .justify_start()
                                 .when(is_selected, |this| {
                                     this.selected(true)
                                 })
@@ -578,6 +247,7 @@ impl OneHupApp {
                             .icon(IconName::Palette)
                             .label("切换主题")
                             .w_full()
+                            .justify_start()
                             .on_click(cx.listener(|_this: &mut OneHupApp, _, _window, cx| {
                                 // 切换主题模式
                                 let current_mode = cx.theme().mode;
@@ -593,35 +263,10 @@ impl OneHupApp {
                             .icon(IconName::Settings)
                             .label("设置")
                             .w_full()
+                            .justify_start()
                             .on_click(cx.listener(|this: &mut OneHupApp, _, window, cx| {
                                 this.add_settings_tab(window, cx);
                             }))
-                    )
-                    .child(
-                        h_flex()
-                            .items_center()
-                            .gap_3()
-                            .child(
-                                div()
-                                    .w(px(32.0))
-                                    .h(px(32.0))
-                                    .rounded(px(16.0))
-                                    .bg(cx.theme().accent)
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .child("U") // 用户头像占位符
-                            )
-                            .child(
-                                v_flex()
-                                    .child("用户")
-                                    .child(
-                                        div()
-                                            .text_xs()
-                                            .text_color(cx.theme().muted_foreground)
-                                            .child("在线")
-                                    )
-                            )
                     )
             )
     }
@@ -633,6 +278,12 @@ impl OneHupApp {
 
 impl Render for OneHupApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // 检查当前活动标签是否是主页
+        let is_home_tab = self.tab_container.read(cx)
+            .active_tab()
+            .map(|tab| tab.content().content_type() == TabContentType::Custom("home".to_string()))
+            .unwrap_or(false);
+
         v_flex()
             .size_full()
             .bg(cx.theme().background)
@@ -649,7 +300,10 @@ impl Render for OneHupApp {
                 h_flex()
                     .flex_1()
                     .w_full()
-                    .child(self.render_sidebar(window, cx))
+                    .when(is_home_tab, |this| {
+                        // 只在主页显示侧边栏
+                        this.child(self.render_sidebar(window, cx))
+                    })
                     .child(
                         // 主内容区域 - 显示活动标签的内容
                         div()

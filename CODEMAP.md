@@ -179,21 +179,21 @@ pub enum ConnectionType {
 
 ---
 
-### 3. 主工作区视图 (`src/app_view.rs`)
+### 3. 数据库tabContent视图 (`src/database_tab.rs`)
 
 **职责**: 协调数据库交互、连接管理和标签页创建
 
 #### 核心结构
 
-**AppView**:
+**DatabaseTabContent**:
 ```rust
-pub struct AppView {
-    tree_view: View<DbTreeView>,                       // 数据库树视图
-    connection_form: View<DbConnectionForm>,           // 连接表单
-    active_connections: HashMap<String, Arc<RwLock<Box<dyn DbConnection>>>>,
-    tab_container: View<TabContainer>,
-    current_connection: Option<String>,
-    current_database: Option<String>,
+pub struct DatabaseTabContent {
+   connection_info: ConnectionInfo,
+   db_tree_view: Entity<crate::db_tree_view::DbTreeView>,
+   inner_tab_container: Entity<TabContainer>,
+   status_msg: Entity<String>,
+   is_connected: Entity<bool>,
+   event_handler: Entity<DatabaseEventHandler>,
 }
 ```
 
@@ -208,13 +208,7 @@ pub struct AppView {
    - 订阅 `DbTreeView` 事件 (打开表数据、视图、创建查询等)
    - 订阅连接表单事件 (保存/测试连接)
 
-3. **标签页创建**:
-   - `open_table_data_tab()`: 打开表数据标签
-   - `open_table_structure_tab()`: 打开表结构标签
-   - `open_view_data_tab()`: 打开视图数据标签
-   - `create_new_query_tab()`: 创建新查询标签
-
-4. **UI 布局**: 三栏布局 (左侧树 + 中心标签页 + 顶部表单)
+3. **UI 布局**: 三栏布局 (左侧树 + 中心标签页 + 顶部表单)
 
 ---
 
