@@ -1,10 +1,13 @@
+use anyhow::Error;
 use crate::connection_store::ConnectionStore;
+use crate::db_connection_form::{DbConnectionForm, DbConnectionFormEvent, DbFormConfig};
 use crate::home::HomeTabContent;
 use crate::setting_tab::SettingsTabContent;
 use crate::tab_container::{TabContainer, TabContentType, TabItem};
 use crate::themes;
 use crate::themes::SwitchThemeMode;
-use db::DatabaseType;
+use db::{DatabasePlugin, DatabaseType, DbConnectionConfig, DbError, DbManager};
+use db::runtime::spawn_result;
 use gpui::{div, prelude::FluentBuilder, px, App, AppContext, Context, Entity, IntoElement, KeyBinding, ParentElement, Render, Styled, Window};
 use gpui_component::dock::{ClosePanel, ToggleZoom};
 use gpui_component::ThemeMode;
@@ -80,6 +83,8 @@ pub struct OneHupApp {
     selected_filter: ConnectionType,
     connections: Vec<ConnectionInfo>,
     tab_container: Entity<TabContainer>,
+    connection_form: Option<Entity<DbConnectionForm>>,
+    connection_store: ConnectionStore,
 }
 
 impl OneHupApp {
@@ -120,6 +125,124 @@ impl OneHupApp {
             selected_filter: ConnectionType::All,
             connections,
             tab_container,
+            connection_form: None,
+            connection_store,
+        }
+    }
+
+    fn show_connection_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let form = cx.new(|cx| {
+            DbConnectionForm::new(DbFormConfig::mysql(), window, cx)
+        });
+
+        // 订阅表单事件
+        cx.subscribe_in(&form, window, |this, form, event, window, cx| {
+            match event {
+                DbConnectionFormEvent::TestConnection(db_type, config) => {
+                    this.handle_test_connection(form.clone(), *db_type, config.clone(), window, cx);
+                }
+                DbConnectionFormEvent::Save(db_type, config) => {
+                    this.handle_save_connection(*db_type, config.clone(), window, cx);
+                }
+                DbConnectionFormEvent::Cancel => {
+                    this.connection_form = None;
+                    cx.notify();
+                }
+            }
+        }).detach();
+
+        self.connection_form = Some(form);
+        cx.notify();
+    }
+
+    fn handle_test_connection(
+        &mut self,
+        form: Entity<DbConnectionForm>,
+        db_type: DatabaseType,
+        config: DbConnectionConfig,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let global_state = cx.global::<db::GlobalDbState>().clone();
+        cx.spawn( async move |_, cx| {
+            let manager = global_state.db_manager;
+
+            // Test connection and collect result
+            let test_result = async {
+                let db_plugin = manager.get_plugin(&db_type)?;
+                let conn = db_plugin.create_connection(config).await?;
+                conn.ping().await?;
+                Ok::<bool, Error>(true)
+            }.await;
+
+
+           match test_result {
+               Ok(_) => {
+                   form.update(cx, |form, cx1| {
+                       form.set_test_result(Ok(true), cx1)
+                   })
+               }
+               Err(_) => {
+                   form.update(cx, |form, cx1| {
+                       form.set_test_result(Err("测试连接失败".to_string()), cx1)
+                   })
+               }
+           }
+
+
+        }).detach();
+    }
+
+    fn handle_save_connection(
+        &mut self,
+        _db_type: DatabaseType,
+        config: DbConnectionConfig,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // 保存到存储
+        let stored = crate::storage::StoredConnection {
+            id: None,
+            name: config.name.clone(),
+            db_type: config.database_type.clone(),
+            host: config.host.clone(),
+            port: config.port,
+            username: config.username.clone(),
+            password: config.password.clone(),
+            database: config.database.clone(),
+            created_at: None,
+            updated_at: None,
+        };
+
+        match self.connection_store.save_connection(stored) {
+            Ok(_) => {
+                // 添加到连接列表
+                let connection_type = match config.database_type {
+                    DatabaseType::MySQL | DatabaseType::PostgreSQL => ConnectionType::Database,
+                };
+
+                let new_connection = ConnectionInfo {
+                    id: None,
+                    name: config.name,
+                    connection_type,
+                    db_type: config.database_type,
+                    host: config.host,
+                    port: config.port,
+                    username: config.username,
+                    password: config.password,
+                    database: config.database,
+                    status: "未连接".to_string(),
+                };
+
+                self.connections.push(new_connection);
+
+                // 关闭表单
+                self.connection_form = None;
+                cx.notify();
+            }
+            Err(e) => {
+                tracing::error!("Failed to save connection: {}", e);
+            }
         }
     }
 
@@ -187,7 +310,9 @@ impl OneHupApp {
                         Button::new("new_connect")
                             .icon(IconName::Plus)
                             .label("NEW CONNECT")
-
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.show_connection_form(window, cx);
+                            }))
                     )
             )
     }
@@ -284,6 +409,8 @@ impl Render for OneHupApp {
             .map(|tab| tab.content().content_type() == TabContentType::Custom("home".to_string()))
             .unwrap_or(false);
 
+        let form = self.connection_form.clone();
+
         v_flex()
             .size_full()
             .bg(cx.theme().background)
@@ -313,6 +440,9 @@ impl Render for OneHupApp {
                             .child(self.render_active_tab_content(window, cx))
                     )
             )
+            .when_some(form, |this, form| {
+                this.child(form)
+            })
     }
 }
 
