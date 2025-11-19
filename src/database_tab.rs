@@ -150,8 +150,22 @@ impl DatabaseTabContent {
             crate::db_tree_view::DbTreeView::new(&vec![stored_conn], window, cx)
         });
 
-        // 创建内部标签容器
-        let inner_tab_container = cx.new(|cx| TabContainer::new(window, cx));
+        // 创建内部标签容器，使用浅色主题（而不是默认的深色）
+        let inner_tab_container = cx.new(|cx| {
+            TabContainer::new(window, cx)
+                .with_tab_bar_colors(
+                    Some(gpui::rgb(0xf8f9fa).into()),    // 极浅灰色背景
+                    Some(gpui::rgb(0xdee2e6).into()),    // 中灰色边框
+                )
+                .with_tab_item_colors(
+                    Some(gpui::rgb(0xd0d7de).into()),    // 浅蓝灰色激活标签
+                    Some(gpui::rgb(0xe9ecef).into()),    // 极浅灰色悬停
+                )
+                .with_tab_content_colors(
+                    Some(gpui::rgb(0x24292f).into()),    // 深灰色文字（接近黑色）
+                    Some(gpui::rgb(0x57606a).into()),    // 中灰色关闭按钮
+                )
+        });
 
         // 创建事件处理器
         let event_handler = cx.new(|cx| {

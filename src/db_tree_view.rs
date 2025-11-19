@@ -563,29 +563,6 @@ impl Render for DbTreeView {
             .size_full()
             .bg(cx.theme().background)
             .child(
-                // 标题栏
-                div()
-                    .w_full()
-                    .p_3()
-                    .bg(cx.theme().muted)
-                    .border_b_1()
-                    .border_color(cx.theme().border)
-                    .child(
-                        h_flex()
-                            .w_full()
-                            .items_center()
-                            .gap_2()
-                            .child(IconName::Building2)
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .font_semibold()
-                                    .text_color(cx.theme().foreground)
-                                    .child("Databases")
-                            )
-                    )
-            )
-            .child(
                 // 树形视图
                 v_flex()
                     .flex_1()

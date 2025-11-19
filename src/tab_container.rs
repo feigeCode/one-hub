@@ -92,6 +92,18 @@ pub struct TabContainer {
     size: Size,
     show_menu: bool,
     dragging_index: Option<usize>,
+    /// Optional background color for the tab bar (defaults to dark theme)
+    tab_bar_bg_color: Option<gpui::Hsla>,
+    /// Optional border color for the tab bar (defaults to dark theme)
+    tab_bar_border_color: Option<gpui::Hsla>,
+    /// Optional background color for active tab (defaults to dark theme)
+    active_tab_bg_color: Option<gpui::Hsla>,
+    /// Optional background color for inactive tab hover state (defaults to dark theme)
+    inactive_tab_hover_color: Option<gpui::Hsla>,
+    /// Optional text color for tabs (defaults to white)
+    tab_text_color: Option<gpui::Hsla>,
+    /// Optional close button color (defaults to gray)
+    tab_close_button_color: Option<gpui::Hsla>,
 }
 
 impl TabContainer {
@@ -103,7 +115,70 @@ impl TabContainer {
             size: Size::Small,
             show_menu: false,
             dragging_index: None,
+            tab_bar_bg_color: None,
+            tab_bar_border_color: None,
+            active_tab_bg_color: None,
+            inactive_tab_hover_color: None,
+            tab_text_color: None,
+            tab_close_button_color: None,
         }
+    }
+
+    /// Set custom tab bar colors (background and border)
+    pub fn with_tab_bar_colors(
+        mut self,
+        bg_color: impl Into<Option<gpui::Hsla>>,
+        border_color: impl Into<Option<gpui::Hsla>>,
+    ) -> Self {
+        self.tab_bar_bg_color = bg_color.into();
+        self.tab_bar_border_color = border_color.into();
+        self
+    }
+
+    /// Set custom tab item colors (active and hover)
+    pub fn with_tab_item_colors(
+        mut self,
+        active_color: impl Into<Option<gpui::Hsla>>,
+        hover_color: impl Into<Option<gpui::Hsla>>,
+    ) -> Self {
+        self.active_tab_bg_color = active_color.into();
+        self.inactive_tab_hover_color = hover_color.into();
+        self
+    }
+
+    /// Set custom tab text and close button colors
+    pub fn with_tab_content_colors(
+        mut self,
+        text_color: impl Into<Option<gpui::Hsla>>,
+        close_button_color: impl Into<Option<gpui::Hsla>>,
+    ) -> Self {
+        self.tab_text_color = text_color.into();
+        self.tab_close_button_color = close_button_color.into();
+        self
+    }
+
+    /// Set tab bar background color
+    pub fn set_tab_bar_bg_color(&mut self, color: impl Into<Option<gpui::Hsla>>, cx: &mut Context<Self>) {
+        self.tab_bar_bg_color = color.into();
+        cx.notify();
+    }
+
+    /// Set tab bar border color
+    pub fn set_tab_bar_border_color(&mut self, color: impl Into<Option<gpui::Hsla>>, cx: &mut Context<Self>) {
+        self.tab_bar_border_color = color.into();
+        cx.notify();
+    }
+
+    /// Set active tab background color
+    pub fn set_active_tab_bg_color(&mut self, color: impl Into<Option<gpui::Hsla>>, cx: &mut Context<Self>) {
+        self.active_tab_bg_color = color.into();
+        cx.notify();
+    }
+
+    /// Set inactive tab hover color
+    pub fn set_inactive_tab_hover_color(&mut self, color: impl Into<Option<gpui::Hsla>>, cx: &mut Context<Self>) {
+        self.inactive_tab_hover_color = color.into();
+        cx.notify();
     }
 
     /// Add a new tab
@@ -371,22 +446,29 @@ impl TabContainer {
     pub fn render_tab_bar_only(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let view = cx.entity();
 
-        // 深色标签栏
+        // 使用自定义颜色或默认深色标签栏
+        let bg_color = self.tab_bar_bg_color.unwrap_or_else(|| gpui::rgb(0x2d2d2d).into());
+        let border_color = self.tab_bar_border_color.unwrap_or_else(|| gpui::rgb(0x1e1e1e).into());
+        let active_tab_color = self.active_tab_bg_color.unwrap_or_else(|| gpui::rgb(0x4a4a4a).into());
+        let hover_tab_color = self.inactive_tab_hover_color.unwrap_or_else(|| gpui::rgb(0x3a3a3a).into());
+        let text_color = self.tab_text_color.unwrap_or_else(|| gpui::white().into());
+        let close_btn_color = self.tab_close_button_color.unwrap_or_else(|| gpui::rgb(0xaaaaaa).into());
+
         div()
             .w_full()
             .h(px(40.0))
-            .bg(gpui::rgb(0x2d2d2d))
+            .bg(bg_color)
             .flex()
             .items_center()
             .px_2()
             .gap_1()
             .border_b_1()
-            .border_color(gpui::rgb(0x1e1e1e))
+            .border_color(border_color)
             .children(self.tabs.iter().enumerate().map(|(idx, tab)| {
                 let is_active = idx == self.active_index;
                 let closeable = tab.content.closeable();
                 let view_clone = view.clone();
-                
+
                 div()
                     .flex()
                     .items_center()
@@ -394,10 +476,10 @@ impl TabContainer {
                     .px_3()
                     .rounded(px(6.0))
                     .when(is_active, |div| {
-                        div.bg(gpui::rgb(0x4a4a4a))
+                        div.bg(active_tab_color)
                     })
                     .when(!is_active, |div| {
-                        div.hover(|style| style.bg(gpui::rgb(0x3a3a3a)))
+                        div.hover(move |style| style.bg(hover_tab_color))
                     })
                     .cursor_pointer()
                     .on_mouse_down(MouseButton::Left, {
@@ -417,7 +499,7 @@ impl TabContainer {
                                 // 标签文字
                                 div()
                                     .text_sm()
-                                    .text_color(gpui::white())
+                                    .text_color(text_color)
                                     .child(tab.content.title().to_string())
                             )
                             .when(closeable, |element| {
@@ -432,11 +514,11 @@ impl TabContainer {
                                         .justify_center()
                                         .rounded(px(2.0))
                                         .cursor_pointer()
-                                        .text_color(gpui::rgb(0xaaaaaa))
+                                        .text_color(close_btn_color)
                                         .hover(|style| {
                                             style
                                                 .bg(gpui::rgb(0x5a5a5a))
-                                                .text_color(gpui::white())
+                                                .text_color(text_color)
                                         })
                                         .on_mouse_down(MouseButton::Left, {
                                             let view_clone = view_clone.clone();
