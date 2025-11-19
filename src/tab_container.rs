@@ -375,7 +375,6 @@ impl TabContainer {
         div()
             .w_full()
             .h(px(44.0))
-            .bg(gpui::rgb(0x2d2d2d)) // 深色背景
             .flex()
             .items_center()
             .px_2()

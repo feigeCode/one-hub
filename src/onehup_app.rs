@@ -353,10 +353,13 @@ impl ConnectionType {
 
 #[derive(Debug, Clone)]
 pub struct ConnectionInfo {
+    pub id: Option<i64>,
     pub name: String,
     pub connection_type: ConnectionType,
     pub host: String,
     pub port: u16,
+    pub username: String,
+    pub database: Option<String>,
     pub status: String,
 }
 
@@ -636,6 +639,7 @@ impl Render for OneHupApp {
             .child(
                 // 顶部标签栏 - 避开 macOS 操作栏
                 div()
+                    .bg(gpui::rgb(0x2d2d2d)) // 深色背景
                     .w_full()
                     .pl(px(80.0)) // 为 macOS 红绿黄按钮留出空间
                     .child(self.tab_container.clone())
