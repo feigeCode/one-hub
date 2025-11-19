@@ -3962,6 +3962,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "mysql"
+version = "0.1.0"
+
+[[package]]
 name = "naga"
 version = "25.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4818,6 +4822,10 @@ dependencies = [
  "static_assertions",
  "thiserror 1.0.69",
 ]
+
+[[package]]
+name = "postgresql"
+version = "0.1.0"
 
 [[package]]
 name = "potential_utf"
@@ -6100,6 +6108,10 @@ dependencies = [
  "base64ct",
  "der",
 ]
+
+[[package]]
+name = "sqlite"
+version = "0.1.0"
 
 [[package]]
 name = "sqlx"

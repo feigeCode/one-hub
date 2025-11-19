@@ -1,11 +1,12 @@
 [workspace]
-members = [".", "crates/assets", "crates/core", "crates/db"]
+members = [".", "crates/assets", "crates/core", "crates/db", "crates/mysql", "crates/postgresql", "crates/sqlite"]
 
 [workspace.dependencies]
 assets = { path = "crates/assets" }
 db = { path = "crates/db" }
 anyhow = "1"
 gpui = "0.2.2"
+rust-embed = { version = "8.7.2", features = ["interpolate-folder-path"] }
 
 [package]
 name = "one-hub"
@@ -25,7 +26,7 @@ color-lsp = "0.2.0"
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1"
 dirs = "6.0"
-rust-embed = { version = "8.7.2", features = ["interpolate-folder-path"] }
+rust-embed.workspace = true
 tracing = "0.1"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 
