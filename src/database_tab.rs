@@ -14,6 +14,7 @@ pub struct DatabaseTabContent {
     status_msg: Entity<String>,
     is_connected: Entity<bool>,
     event_handler: Entity<DatabaseEventHandler>,
+    resizable_id: SharedString,
 }
 
 // 事件处理器 - 用于订阅树视图事件
@@ -175,6 +176,9 @@ impl DatabaseTabContent {
         let status_msg = cx.new(|_| "正在连接...".to_string());
         let is_connected = cx.new(|_| false);
 
+        // 创建固定的 resizable ID
+        let resizable_id = SharedString::from(format!("db-main-{}", connection_info.name));
+
         let instance = Self {
             connection_info,
             db_tree_view,
@@ -182,6 +186,7 @@ impl DatabaseTabContent {
             status_msg,
             is_connected,
             event_handler,
+            resizable_id,
         };
 
         // 自动开始连接
@@ -467,42 +472,36 @@ impl TabContent for DatabaseTabContent {
             )
             .child(
                 // 主内容区域 - 左侧树视图，右侧标签容器
-                div()
-                    .flex_1()
-                    .w_full()
+                h_resizable(self.resizable_id.clone())
                     .child(
-                        h_resizable(SharedString::from(format!("db-main-{}", self.connection_info.name)))
-                            .child(
-                                resizable_panel()
-                                    .size(px(300.))
-                                    .size_range(px(200.)..px(500.))
-                                    .child(self.db_tree_view.clone()),
-                            )
-                            .child(
-                                resizable_panel()
-                                    .child({
-                                        // 获取活动标签的内容
-                                        let active_tab_content = self.inner_tab_container.read(cx)
-                                            .active_tab()
-                                            .map(|tab| tab.content().clone());
+                        resizable_panel()
+                            .size(px(300.))
+                            .size_range(px(200.)..px(500.))
+                            .child(self.db_tree_view.clone()),
+                    )
+                    .child({
+                        // 获取活动标签的内容
+                        let active_tab_content = self.inner_tab_container.read(cx)
+                            .active_tab()
+                            .map(|tab| tab.content().clone());
 
-                                        // 垂直布局：标签栏 + 内容
-                                        v_flex()
-                                            .size_full()
-                                            .child(self.inner_tab_container.clone())
-                                            .child(
-                                                // 标签内容区域
-                                                div()
-                                                    .flex_1()
-                                                    .w_full()
-                                                    .overflow_hidden()
-                                                    .when_some(active_tab_content, |el, content| {
-                                                        el.child(content.render_content(window, cx))
-                                                    })
-                                            )
-                                    }),
-                            ),
-                    ),
+                        // 垂直布局：标签栏 + 内容
+                        // 不使用 resizable_panel() 包裹，让其自动填充剩余空间
+                        v_flex()
+                            .size_full()
+                            .child(self.inner_tab_container.clone())
+                            .child(
+                                // 标签内容区域
+                                div()
+                                    .flex_1()
+                                    .w_full()
+                                    .overflow_hidden()
+                                    .when_some(active_tab_content, |el, content| {
+                                        el.child(content.render_content(window, cx))
+                                    })
+                            )
+                            .into_any_element()
+                    })
             )
             .into_any_element()
     }
@@ -525,6 +524,7 @@ impl Clone for DatabaseTabContent {
             status_msg: self.status_msg.clone(),
             is_connected: self.is_connected.clone(),
             event_handler: self.event_handler.clone(),
+            resizable_id: self.resizable_id.clone(),
         }
     }
 }
