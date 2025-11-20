@@ -9,4 +9,4 @@ doctest = false
 [dependencies]
 anyhow.workspace = true
 gpui.workspace = true
-rust-embed.workspace = true
+rust-embed = { version = "8.7.2", features = ["interpolate-folder-path"] }

@@ -1,8 +1,10 @@
 use std::any::Any;
-use gpui::{div, px, AnyElement, App, AppContext, Context, Entity, FontWeight, Hsla, IntoElement, ParentElement, SharedString, Styled, Window};
+use std::sync::{Arc, RwLock};
+use gpui::{div, px, AnyElement, App, AppContext, Context, Entity, FontWeight, Hsla, IntoElement, ParentElement, Pixels, SharedString, Styled, Window};
 use gpui::prelude::FluentBuilder;
 use gpui_component::{h_flex, v_flex, ActiveTheme, IconName};
 use gpui_component::button::{Button, ButtonVariants};
+use gpui_component::resizable::ResizableState;
 use crate::onehup_app::ConnectionInfo;
 use crate::tab_container::{TabContainer, TabContent, TabContentType, TabItem};
 
@@ -15,6 +17,8 @@ pub struct DatabaseTabContent {
     is_connected: Entity<bool>,
     event_handler: Entity<DatabaseEventHandler>,
     resizable_id: SharedString,
+    // 保存 resizable 状态，确保在重新渲染时不会丢失
+    resizable_state: Entity<ResizableState>,
 }
 
 // 事件处理器 - 用于订阅树视图事件
@@ -179,6 +183,9 @@ impl DatabaseTabContent {
         // 创建固定的 resizable ID
         let resizable_id = SharedString::from(format!("db-main-{}", connection_info.name));
 
+        // 创建 resizable 状态，让它在重新渲染时保持不变
+        let resizable_state = cx.new(|_cx| ResizableState::default());
+
         let instance = Self {
             connection_info,
             db_tree_view,
@@ -187,6 +194,7 @@ impl DatabaseTabContent {
             is_connected,
             event_handler,
             resizable_id,
+            resizable_state,
         };
 
         // 自动开始连接
@@ -473,6 +481,7 @@ impl TabContent for DatabaseTabContent {
             .child(
                 // 主内容区域 - 左侧树视图，右侧标签容器
                 h_resizable(self.resizable_id.clone())
+                    .with_state(&self.resizable_state)
                     .child(
                         resizable_panel()
                             .size(px(300.))
@@ -484,9 +493,6 @@ impl TabContent for DatabaseTabContent {
                         let active_tab_content = self.inner_tab_container.read(cx)
                             .active_tab()
                             .map(|tab| tab.content().clone());
-
-                        // 垂直布局：标签栏 + 内容
-                        // 不使用 resizable_panel() 包裹，让其自动填充剩余空间
                         v_flex()
                             .size_full()
                             .child(self.inner_tab_container.clone())
@@ -525,6 +531,7 @@ impl Clone for DatabaseTabContent {
             is_connected: self.is_connected.clone(),
             event_handler: self.event_handler.clone(),
             resizable_id: self.resizable_id.clone(),
+            resizable_state: self.resizable_state.clone(),
         }
     }
 }

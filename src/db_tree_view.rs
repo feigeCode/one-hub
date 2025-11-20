@@ -748,43 +748,43 @@ impl Render for DbTreeView {
                             })
                     )
             )
-            .child(
-                // 状态栏
-                div()
-                    .w_full()
-                    .p_2()
-                    .bg(cx.theme().muted.opacity(0.5))
-                    .border_t_1()
-                    .border_color(cx.theme().border)
-                    .child(
-                        h_flex()
-                            .w_full()
-                            .justify_between()
-                            .items_center()
-                            .gap_3()
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .children(
-                                        self.tree_state
-                                            .read(cx)
-                                            .selected_index()
-                                            .map(|ix| format!("Selected: {}", ix))
-                                    )
-                            )
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .children(
-                                        self.selected_item
-                                            .as_ref()
-                                            .map(|item| item.label.clone())
-                                    )
-                            )
-                    )
-            )
+            // .child(
+            //     // 状态栏
+            //     div()
+            //         .w_full()
+            //         .p_2()
+            //         .bg(cx.theme().muted.opacity(0.5))
+            //         .border_t_1()
+            //         .border_color(cx.theme().border)
+            //         .child(
+            //             h_flex()
+            //                 .w_full()
+            //                 .justify_between()
+            //                 .items_center()
+            //                 .gap_3()
+            //                 .child(
+            //                     div()
+            //                         .text_xs()
+            //                         .text_color(cx.theme().muted_foreground)
+            //                         .children(
+            //                             self.tree_state
+            //                                 .read(cx)
+            //                                 .selected_index()
+            //                                 .map(|ix| format!("Selected: {}", ix))
+            //                         )
+            //                 )
+            //                 .child(
+            //                     div()
+            //                         .text_xs()
+            //                         .text_color(cx.theme().muted_foreground)
+            //                         .children(
+            //                             self.selected_item
+            //                                 .as_ref()
+            //                                 .map(|item| item.label.clone())
+            //                         )
+            //                 )
+            //         )
+            // )
     }
 }
 

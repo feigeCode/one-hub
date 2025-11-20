@@ -30,7 +30,6 @@ one-hub/
 ├── src/                          # 主应用程序
 │   ├── main.rs                   # 程序入口
 │   ├── onehup_app.rs             # 应用状态管理与 UI 布局
-│   ├── app_view.rs               # 主工作区视图
 │   ├── db_tree_view.rs           # 数据库树形导航
 │   ├── sql_editor_view.rs        # SQL 编辑器标签页
 │   ├── sql_editor.rs             # 文本编辑器组件

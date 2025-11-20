@@ -1,46 +1,99 @@
 [workspace]
-members = [".", "crates/assets", "crates/core", "crates/db", "crates/mysql", "crates/postgresql", "crates/sqlite"]
+members = [".", "crates/assets", "crates/core", "crates/db", "crates/ui", "crates/mysql", "crates/postgresql", "crates/sqlite"]
 
-[workspace.dependencies]
-assets = { path = "crates/assets" }
-db = { path = "crates/db" }
-anyhow = "1"
-gpui = "0.2.2"
-rust-embed = { version = "8.7.2", features = ["interpolate-folder-path"] }
 
 [package]
 name = "one-hub"
 version = "0.1.0"
 edition = "2024"
 
-[dependencies]
-assets.workspace = true
-db.workspace = true
-anyhow = "1"
-lsp-types = "0.97.0"
+[workspace.dependencies]
+gpui-component = { path = "crates/ui", version = "0.4.0" }
+gpui-component-macros = { path = "crates/macros", version = "0.4.0" }
 gpui = "0.2.2"
 gpui-macros = "0.2.2"
-# Enable built-in tree-sitter language support so Syntax Highlighting works for SQL
-gpui-component = { version = "0.4.0", features = ["tree-sitter-languages"] }
-color-lsp = "0.2.0"
+reqwest = { version = "0.12.15-zed", package = "zed-reqwest" }
+sum-tree = { version = "0.2.0", package = "zed-sum-tree" }
+
+anyhow = "1"
+log = "0.4"
+lsp-types = "0.97.0"
+notify = "7.0.0"
+raw-window-handle = "0.6.2"
+ropey = { version = "=2.0.0-beta.1", features = [
+    "metric_lines_lf",
+    "metric_utf16",
+] }
+rust-i18n = "3"
+schemars = "1"
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1"
-dirs = "6.0"
-rust-embed.workspace = true
-tracing = "0.1"
-tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
-
-
-# Database connections
+serde_repr = "0.1"
+smallvec = "1"
+smol = "2"
+tracing = "0.1.41"
+tracing-subscriber = "0.3"
 async-trait = "0.1"
 sqlx = { version = "0.8", features = ["runtime-tokio-native-tls", "mysql", "postgres", "sqlite", "chrono", "bigdecimal", "json"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
-lazy_static = "1.4"
-once_cell = "1.21.3"
-hex = "0.4"
-futures = "0.3.31"
-rand = "0.8.5"
+assets = { path = "crates/assets" }
+db = { path = "crates/db" }
 
-[target.'cfg(target_os = "linux")'.dependencies]
-gtk = { version = "0.18" }
+[workspace.dependencies.windows]
+features = ["Wdk", "Wdk_System", "Wdk_System_SystemServices"]
+version = "0.58.0"
+
+[workspace.lints.clippy]
+almost_complete_range = "allow"
+arc_with_non_send_sync = "allow"
+borrowed_box = "allow"
+dbg_macro = "deny"
+let_underscore_future = "allow"
+manual_is_multiple_of = "allow"
+map_entry = "allow"
+module_inception = "allow"
+non_canonical_partial_ord_impl = "allow"
+reversed_empty_ranges = "allow"
+single_range_in_vec_init = "allow"
+style = { level = "allow", priority = -1 }
+todo = "deny"
+type_complexity = "allow"
+
+[profile.dev]
+codegen-units = 16
+debug = "full"
+split-debuginfo = "unpacked"
+
+[profile.dev.package]
+resvg = { opt-level = 3 }
+rustybuzz = { opt-level = 3 }
+taffy = { opt-level = 3 }
+ttf-parser = { opt-level = 3 }
+
+[workspace.metadata.typos]
+files.extend-exclude = ["**/fixtures/*"]
+[dependencies]
+gpui = { workspace = true }
+gpui-macros = { workspace = true }
+gpui-component = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sqlx = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+rust-i18n = { workspace = true }
+lsp-types = { workspace = true }
+async-trait = { workspace = true }
+dirs = "6.0"
+assets = { workspace = true }
+db = { workspace = true }
+
+[profile.release]
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+strip = true
+panic = "abort"
 
