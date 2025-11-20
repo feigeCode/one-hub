@@ -90,6 +90,10 @@ pub enum IconName {
     WindowMaximize,
     WindowMinimize,
     WindowRestore,
+    DATABASE,
+    TABLE,
+    COLUMN,
+    KEY,
 }
 
 impl IconName {
@@ -177,6 +181,10 @@ impl IconName {
             Self::WindowMaximize => "icons/window-maximize.svg",
             Self::WindowMinimize => "icons/window-minimize.svg",
             Self::WindowRestore => "icons/window-restore.svg",
+            Self::DATABASE => "icons/database.svg",
+            Self::TABLE => "icons/table.svg",
+            Self::COLUMN => "icons/column.svg",
+            Self::KEY => "icons/key.svg",
         }
         .into()
     }

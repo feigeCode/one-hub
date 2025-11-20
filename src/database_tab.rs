@@ -1,142 +1,102 @@
 use std::any::Any;
-use std::sync::{Arc, RwLock};
-use gpui::{div, px, AnyElement, App, AppContext, Context, Entity, FontWeight, Hsla, IntoElement, ParentElement, Pixels, SharedString, Styled, Window};
+use std::sync::Arc;
+use gpui::{
+    div, px, AnyElement, App, AppContext, Context, Entity, FontWeight, Hsla, IntoElement,
+    ParentElement, SharedString, Styled, Window, WeakEntity, Edges, Task, Subscription,
+};
 use gpui::prelude::FluentBuilder;
 use gpui_component::{h_flex, v_flex, ActiveTheme, IconName};
-use gpui_component::button::{Button, ButtonVariants};
-use gpui_component::resizable::ResizableState;
+use gpui_component::dock::{DockArea, DockAreaState, DockEvent, DockItem, PanelView};
 use crate::onehup_app::ConnectionInfo;
-use crate::tab_container::{TabContainer, TabContent, TabContentType, TabItem};
+use crate::tab_container::{TabContent, TabContentType};
 
-// 数据库连接页面内容 - 参考 AppView 实现完整的数据库管理界面
-pub struct DatabaseTabContent {
-    connection_info: ConnectionInfo,
-    db_tree_view: Entity<crate::db_tree_view::DbTreeView>,
-    inner_tab_container: Entity<TabContainer>,
-    status_msg: Entity<String>,
-    is_connected: Entity<bool>,
-    event_handler: Entity<DatabaseEventHandler>,
-    resizable_id: SharedString,
-    // 保存 resizable 状态，确保在重新渲染时不会丢失
-    resizable_state: Entity<ResizableState>,
-}
+// Constants for dock area
+const DATABASE_TAB_DOCK_VERSION: usize = 1;
 
-// 事件处理器 - 用于订阅树视图事件
+// Event handler for database tree view events
 struct DatabaseEventHandler {
-    inner_tab_container: Entity<TabContainer>,
-    _tree_subscription: Option<gpui::Subscription>,
+    dock_area: WeakEntity<DockArea>,
+    _tree_subscription: Subscription,
 }
 
 impl DatabaseEventHandler {
     fn new(
         db_tree_view: &Entity<crate::db_tree_view::DbTreeView>,
-        inner_tab_container: Entity<TabContainer>,
+        dock_area: WeakEntity<DockArea>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         use crate::db_tree_view::DbTreeViewEvent;
 
-        let inner_tab_container_clone = inner_tab_container.clone();
+        let dock_area_clone = dock_area.clone();
         let tree_subscription = cx.subscribe_in(db_tree_view, window, move |_handler, _tree, event, window, cx| {
             match event {
                 DbTreeViewEvent::CreateNewQuery { database } => {
                     use crate::sql_editor_view::SqlEditorTabContent;
 
-                    let tab_count = inner_tab_container_clone.read(cx).tabs().len();
-                    let sql_editor_content = SqlEditorTabContent::new_with_database(
-                        format!("{} - Query {}", database, tab_count + 1),
-                        Some(database.clone()),
-                        window,
-                        cx,
-                    );
-
-                    sql_editor_content.load_databases(window, cx);
-
-                    let tab = TabItem::new(
-                        format!("sql-editor-{}-{}", database, tab_count + 1),
-                        sql_editor_content,
-                    );
-
-                    inner_tab_container_clone.update(cx, |tc, cx| {
-                        tc.add_and_activate_tab(tab, cx);
+                    // Create new SQL editor
+                    let sql_editor = cx.new(|cx| {
+                        let editor = SqlEditorTabContent::new_with_database(
+                            format!("{} - Query", database),
+                            Some(database.clone()),
+                            window,
+                            cx,
+                        );
+                        // Load databases during creation
+                        editor.load_databases(window, cx);
+                        editor
                     });
+
+                    // Add to center area of DockArea
+                    if let Ok(_) = dock_area_clone.update(cx, |dock_area, cx| {
+                        let panel: Arc<dyn PanelView> = Arc::new(sql_editor.clone());
+                        dock_area.add_panel(panel, gpui_component::dock::DockPlacement::Center, None, window, cx);
+                    }) {
+                        // Successfully added
+                    }
                 }
                 DbTreeViewEvent::OpenTableData { database, table } => {
-                    use crate::tab_contents::TableDataTabContent;
-
-                    let tab_id = format!("table-data-{}-{}", database, table);
-
-                    inner_tab_container_clone.update(cx, |tc, cx| {
-                        if let Some(index) = tc.tabs().iter().position(|t| t.id() == tab_id) {
-                            tc.set_active_index(index, window, cx);
-                        } else {
-                            let tab_title = format!("{}.{}", database, table);
-                            let tab = TabItem::new(
-                                tab_id.clone(),
-                                TableDataTabContent::new(tab_title, window, cx),
-                            );
-                            tc.add_and_activate_tab(tab, cx);
-                        }
-                    });
+                    // TODO: Implement TableDataTabContent as Panel
+                    eprintln!("OpenTableData event: {}.{}", database, table);
                 }
                 DbTreeViewEvent::OpenViewData { database, view } => {
-                    use crate::tab_contents::TableDataTabContent;
-
-                    let tab_id = format!("view-data-{}-{}", database, view);
-
-                    inner_tab_container_clone.update(cx, |tc, cx| {
-                        if let Some(index) = tc.tabs().iter().position(|t| t.id() == tab_id) {
-                            tc.set_active_index(index, window, cx);
-                        } else {
-                            let tab_title = format!("{}.{}", database, view);
-                            let tab = TabItem::new(
-                                tab_id.clone(),
-                                TableDataTabContent::new(tab_title, window, cx),
-                            );
-                            tc.add_and_activate_tab(tab, cx);
-                        }
-                    });
+                    // TODO: Implement TableDataTabContent as Panel for views
+                    eprintln!("OpenViewData event: {}.{}", database, view);
                 }
                 DbTreeViewEvent::OpenTableStructure { database, table } => {
-                    use crate::tab_contents::TableStructureTabContent;
-
-                    let tab_id = format!("table-structure-{}-{}", database, table);
-
-                    inner_tab_container_clone.update(cx, |tc, cx| {
-                        if let Some(index) = tc.tabs().iter().position(|t| t.id() == tab_id) {
-                            tc.set_active_index(index, window, cx);
-                        } else {
-                            let tab = TabItem::new(
-                                tab_id.clone(),
-                                TableStructureTabContent::new(
-                                    database.clone(),
-                                    table.clone(),
-                                    window,
-                                    cx,
-                                ),
-                            );
-                            tc.add_and_activate_tab(tab, cx);
-                        }
-                    });
+                    // TODO: Implement TableStructureTabContent as Panel
+                    eprintln!("OpenTableStructure event: {}.{}", database, table);
                 }
                 DbTreeViewEvent::ConnectToConnection { .. } => {
-                    // 已经连接，忽略
+                    // Already connected, ignore
                 }
             }
         });
 
         Self {
-            inner_tab_container,
-            _tree_subscription: Some(tree_subscription),
+            dock_area,
+            _tree_subscription: tree_subscription,
         }
     }
+}
+
+// Database connection tab content - using DockArea architecture
+pub struct DatabaseTabContent {
+    connection_info: ConnectionInfo,
+    dock_area: Entity<DockArea>,
+    last_layout_state: Option<DockAreaState>,
+    _save_layout_task: Option<Task<()>>,
+    db_tree_view: Entity<crate::db_tree_view::DbTreeView>,
+    status_msg: Entity<String>,
+    is_connected: Entity<bool>,
+    event_handler: Option<Entity<DatabaseEventHandler>>,
 }
 
 impl DatabaseTabContent {
     pub fn new(connection_info: ConnectionInfo, window: &mut Window, cx: &mut App) -> Self {
         use crate::storage::StoredConnection;
 
-        // 创建一个临时的 StoredConnection 用于初始化 DbTreeView
+        // Create a temporary StoredConnection for DbTreeView initialization
         let stored_conn = StoredConnection {
             id: connection_info.id,
             name: connection_info.name.clone(),
@@ -150,63 +110,81 @@ impl DatabaseTabContent {
             updated_at: None,
         };
 
-        // 创建数据库树视图
+        // Create database tree view
         let db_tree_view = cx.new(|cx| {
             crate::db_tree_view::DbTreeView::new(&vec![stored_conn], window, cx)
         });
 
-        // 创建内部标签容器，使用浅色主题（而不是默认的深色）
-        let inner_tab_container = cx.new(|cx| {
-            TabContainer::new(window, cx)
-                .with_tab_bar_colors(
-                    Some(gpui::rgb(0xf8f9fa).into()),    // 极浅灰色背景
-                    Some(gpui::rgb(0xdee2e6).into()),    // 中灰色边框
-                )
-                .with_tab_item_colors(
-                    Some(gpui::rgb(0xd0d7de).into()),    // 浅蓝灰色激活标签
-                    Some(gpui::rgb(0xe9ecef).into()),    // 极浅灰色悬停
-                )
-                .with_tab_content_colors(
-                    Some(gpui::rgb(0x24292f).into()),    // 深灰色文字（接近黑色）
-                    Some(gpui::rgb(0x57606a).into()),    // 中灰色关闭按钮
-                )
+        // Create DockArea for this database connection
+        let dock_id = format!("db-dock-{}", connection_info.id.unwrap_or(0));
+        let dock_area = cx.new(|cx| {
+            DockArea::new(dock_id, Some(DATABASE_TAB_DOCK_VERSION), window, cx)
         });
 
-        // 创建事件处理器
-        let event_handler = cx.new(|cx| {
-            DatabaseEventHandler::new(&db_tree_view, inner_tab_container.clone(), window, cx)
+        // Create a default SQL Editor tab for the center area
+        let sql_editor = cx.new(|cx| {
+            crate::sql_editor_view::SqlEditorTabContent::new_with_database(
+                format!("{} - Query", connection_info.name),
+                connection_info.database.clone(),
+                window,
+                cx,
+            )
         });
 
-        let status_msg = cx.new(|_| "正在连接...".to_string());
+        // Setup the dock layout - tree view on left, sql editor in center
+        let weak_dock_area = dock_area.downgrade();
+        dock_area.update(cx, |dock_area, cx| {
+            // Add tree view to left dock
+            let panel_view: Arc<dyn PanelView> = Arc::new(db_tree_view.clone());
+            let left_dock_item = DockItem::tabs(vec![panel_view], Some(0), &weak_dock_area, window, cx);
+            dock_area.set_left_dock(left_dock_item, Some(px(280.0)), true, window, cx);
+
+            // Add SQL editor to center area
+            let center_panel: Arc<dyn PanelView> = Arc::new(sql_editor.clone());
+            let center_dock_item = DockItem::tabs(vec![center_panel], Some(0), &weak_dock_area, window, cx);
+            dock_area.set_center(center_dock_item, window, cx);
+
+            // Set collapsible edges
+            dock_area.set_dock_collapsible(
+                Edges {
+                    left: true,
+                    bottom: false,
+                    right: false,
+                    ..Default::default()
+                },
+                window,
+                cx,
+            );
+        });
+
+        let status_msg = cx.new(|_| "Connecting...".to_string());
         let is_connected = cx.new(|_| false);
 
-        // 创建固定的 resizable ID
-        let resizable_id = SharedString::from(format!("db-main-{}", connection_info.name));
-
-        // 创建 resizable 状态，让它在重新渲染时保持不变
-        let resizable_state = cx.new(|_cx| ResizableState::default());
+        // Create event handler to handle tree view events
+        let event_handler = cx.new(|cx| {
+            DatabaseEventHandler::new(&db_tree_view, weak_dock_area.clone(), window, cx)
+        });
 
         let instance = Self {
-            connection_info,
+            connection_info: connection_info.clone(),
+            dock_area,
+            last_layout_state: None,
+            _save_layout_task: None,
             db_tree_view,
-            inner_tab_container,
             status_msg,
             is_connected,
-            event_handler,
-            resizable_id,
-            resizable_state,
+            event_handler: Some(event_handler),
         };
 
-        // 自动开始连接
-        instance.start_connection(cx);
+        // Automatically start connection
+        instance.start_connection(connection_info, cx);
 
         instance
     }
 
-    fn start_connection(&self, cx: &mut App) {
+    fn start_connection(&self, conn: ConnectionInfo, cx: &mut App) {
         let status_msg = self.status_msg.clone();
         let is_connected = self.is_connected.clone();
-        let conn = self.connection_info.clone();
         let db_tree_view = self.db_tree_view.clone();
 
         let global_state = cx.global::<db::GlobalDbState>().clone();
@@ -229,7 +207,7 @@ impl DatabaseTabContent {
                 Err(e) => {
                     cx.update(|cx| {
                         status_msg.update(cx, |s, cx| {
-                            *s = format!("获取插件失败: {}", e);
+                            *s = format!("Failed to get plugin: {}", e);
                             cx.notify();
                         });
                     })
@@ -264,7 +242,7 @@ impl DatabaseTabContent {
                         });
 
                         status_msg.update(cx, |s, cx| {
-                            *s = format!("已连接到 {}", config.name);
+                            *s = format!("Connected to {}", config.name);
                             cx.notify();
                         });
 
@@ -278,7 +256,7 @@ impl DatabaseTabContent {
                 Err(e) => {
                     cx.update(|cx| {
                         status_msg.update(cx, |s, cx| {
-                            *s = format!("连接失败: {}", e);
+                            *s = format!("Connection failed: {}", e);
                             cx.notify();
                         });
                     })
@@ -289,6 +267,116 @@ impl DatabaseTabContent {
             .detach();
     }
 
+    fn render_connection_status(&self, cx: &mut App) -> AnyElement {
+        let status_text = self.status_msg.read(cx).clone();
+        let is_error = status_text.contains("Failed") || status_text.contains("failed");
+
+        v_flex()
+            .size_full()
+            .items_center()
+            .justify_center()
+            .gap_6()
+            .child(
+                // Loading animation or error icon
+                div()
+                    .w(px(64.0))
+                    .h(px(64.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(
+                        div()
+                            .w(px(48.0))
+                            .h(px(48.0))
+                            .rounded(px(24.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .when(!is_error, |this| {
+                                // Loading animation - simple circle
+                                this.border_4()
+                                    .border_color(cx.theme().accent)
+                                    .text_2xl()
+                                    .text_color(cx.theme().accent)
+                                    .child("⟳")
+                            })
+                            .when(is_error, |this| {
+                                // Error state - red circle
+                                this.bg(Hsla::red())
+                                    .text_color(gpui::white())
+                                    .text_2xl()
+                                    .child("✕")
+                            })
+                    )
+            )
+            .child(
+                div()
+                    .text_xl()
+                    .font_weight(FontWeight::BOLD)
+                    .child(format!("Database Connection: {}", self.connection_info.name))
+            )
+            .child(
+                v_flex()
+                    .gap_2()
+                    .p_4()
+                    .bg(cx.theme().muted)
+                    .rounded(px(8.0))
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child("Host:")
+                            )
+                            .child(self.connection_info.host.clone())
+                    )
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child("Port:")
+                            )
+                            .child(format!("{}", self.connection_info.port))
+                    )
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child("Username:")
+                            )
+                            .child(self.connection_info.username.clone())
+                    )
+                    .when_some(self.connection_info.database.as_ref(), |this, db| {
+                        this.child(
+                            h_flex()
+                                .gap_2()
+                                .child(
+                                    div()
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .child("Database:")
+                                )
+                                .child(db.clone())
+                        )
+                    })
+            )
+            .child(
+                div()
+                    .text_lg()
+                    .when(!is_error, |this| {
+                        this.text_color(cx.theme().accent)
+                    })
+                    .when(is_error, |this| {
+                        this.text_color(Hsla::red())
+                    })
+                    .child(status_text)
+            )
+            .into_any_element()
+    }
 }
 
 impl TabContent for DatabaseTabContent {
@@ -304,212 +392,19 @@ impl TabContent for DatabaseTabContent {
         true
     }
 
-    fn render_content(&self, window: &mut Window, cx: &mut App) -> AnyElement {
-        let status_msg_render = self.status_msg.clone();
+    fn render_content(&self, _window: &mut Window, cx: &mut App) -> AnyElement {
         let is_connected_flag = *self.is_connected.read(cx);
 
         if !is_connected_flag {
-            // 显示加载动画
-            let status_text = status_msg_render.read(cx).clone();
-            let is_error = status_text.contains("失败");
-
-            return v_flex()
+            // Show loading/connection status
+            self.render_connection_status(cx)
+        } else {
+            // Show DockArea - it manages the entire layout
+            div()
                 .size_full()
-                .items_center()
-                .justify_center()
-                .gap_6()
-                .child(
-                    // 加载动画或错误图标
-                    div()
-                        .w(px(64.0))
-                        .h(px(64.0))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .child(
-                            div()
-                                .w(px(48.0))
-                                .h(px(48.0))
-                                .rounded(px(24.0))
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .when(!is_error, |this| {
-                                    // 加载动画 - 简单的圆圈
-                                    this.border_4()
-                                        .border_color(cx.theme().accent)
-                                        .text_2xl()
-                                        .text_color(cx.theme().accent)
-                                        .child("⟳")
-                                })
-                                .when(is_error, |this| {
-                                    // 错误状态 - 红色圆圈
-                                    this.bg(Hsla::red())
-                                        .text_color(gpui::white())
-                                        .text_2xl()
-                                        .child("✕")
-                                })
-                        )
-                )
-                .child(
-                    div()
-                        .text_xl()
-                        .font_weight(FontWeight::BOLD)
-                        .child(format!("数据库连接: {}", self.connection_info.name))
-                )
-                .child(
-                    v_flex()
-                        .gap_2()
-                        .p_4()
-                        .bg(cx.theme().muted)
-                        .rounded(px(8.0))
-                        .child(
-                            h_flex()
-                                .gap_2()
-                                .child(
-                                    div()
-                                        .font_weight(FontWeight::SEMIBOLD)
-                                        .child("主机:")
-                                )
-                                .child(self.connection_info.host.clone())
-                        )
-                        .child(
-                            h_flex()
-                                .gap_2()
-                                .child(
-                                    div()
-                                        .font_weight(FontWeight::SEMIBOLD)
-                                        .child("端口:")
-                                )
-                                .child(format!("{}", self.connection_info.port))
-                        )
-                        .child(
-                            h_flex()
-                                .gap_2()
-                                .child(
-                                    div()
-                                        .font_weight(FontWeight::SEMIBOLD)
-                                        .child("用户名:")
-                                )
-                                .child(self.connection_info.username.clone())
-                        )
-                        .when_some(self.connection_info.database.as_ref(), |this, db| {
-                            this.child(
-                                h_flex()
-                                    .gap_2()
-                                    .child(
-                                        div()
-                                            .font_weight(FontWeight::SEMIBOLD)
-                                            .child("数据库:")
-                                    )
-                                    .child(db.clone())
-                            )
-                        })
-                )
-                .child(
-                    div()
-                        .text_lg()
-                        .when(!is_error, |this| {
-                            this.text_color(cx.theme().accent)
-                        })
-                        .when(is_error, |this| {
-                            this.text_color(Hsla::red())
-                        })
-                        .child(status_text)
-                )
-                .into_any_element();
+                .child(self.dock_area.clone())
+                .into_any_element()
         }
-
-        // 已连接 - 显示完整的数据库管理界面（类似 AppView）
-        use gpui_component::resizable::{h_resizable, resizable_panel};
-        use gpui_component::{Sizable, Size};
-
-        v_flex()
-            .size_full()
-            .gap_2()
-            .child(
-                // 工具栏
-                h_flex()
-                    .gap_2()
-                    .p_2()
-                    .bg(cx.theme().muted)
-                    .rounded_md()
-                    .items_center()
-                    .w_full()
-                    .child(
-                        Button::new("new-query")
-                            .with_size(Size::Small)
-                            .primary()
-                            .label("新建查询")
-                            .on_click({
-                                let inner_tab_container = self.inner_tab_container.clone();
-                                move |_, window, cx| {
-                                    use crate::sql_editor_view::SqlEditorTabContent;
-
-                                    let tab_count = inner_tab_container.read(cx).tabs().len();
-                                    let sql_editor_content = SqlEditorTabContent::new(
-                                        format!("Query {}", tab_count + 1),
-                                        window,
-                                        cx,
-                                    );
-
-                                    sql_editor_content.load_databases(window, cx);
-
-                                    let tab = TabItem::new(
-                                        format!("sql-editor-{}", tab_count + 1),
-                                        sql_editor_content,
-                                    );
-
-                                    inner_tab_container.update(cx, |tc, cx| {
-                                        tc.add_and_activate_tab(tab, cx);
-                                    });
-                                }
-                            }),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .flex()
-                            .justify_end()
-                            .items_center()
-                            .px_2()
-                            .text_color(cx.theme().muted_foreground)
-                            .text_sm()
-                            .child(status_msg_render.read(cx).clone()),
-                    ),
-            )
-            .child(
-                // 主内容区域 - 左侧树视图，右侧标签容器
-                h_resizable(self.resizable_id.clone())
-                    .with_state(&self.resizable_state)
-                    .child(
-                        resizable_panel()
-                            .size(px(300.))
-                            .size_range(px(200.)..px(500.))
-                            .child(self.db_tree_view.clone()),
-                    )
-                    .child({
-                        // 获取活动标签的内容
-                        let active_tab_content = self.inner_tab_container.read(cx)
-                            .active_tab()
-                            .map(|tab| tab.content().clone());
-                        v_flex()
-                            .size_full()
-                            .child(self.inner_tab_container.clone())
-                            .child(
-                                // 标签内容区域
-                                div()
-                                    .flex_1()
-                                    .w_full()
-                                    .overflow_hidden()
-                                    .when_some(active_tab_content, |el, content| {
-                                        el.child(content.render_content(window, cx))
-                                    })
-                            )
-                            .into_any_element()
-                    })
-            )
-            .into_any_element()
     }
 
     fn content_type(&self) -> TabContentType {
@@ -525,13 +420,13 @@ impl Clone for DatabaseTabContent {
     fn clone(&self) -> Self {
         Self {
             connection_info: self.connection_info.clone(),
+            dock_area: self.dock_area.clone(),
+            last_layout_state: self.last_layout_state.clone(),
+            _save_layout_task: None, // Don't clone tasks
             db_tree_view: self.db_tree_view.clone(),
-            inner_tab_container: self.inner_tab_container.clone(),
             status_msg: self.status_msg.clone(),
             is_connected: self.is_connected.clone(),
             event_handler: self.event_handler.clone(),
-            resizable_id: self.resizable_id.clone(),
-            resizable_state: self.resizable_state.clone(),
         }
     }
 }

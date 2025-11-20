@@ -8,6 +8,7 @@ pub mod runtime;
 // Database implementations
 pub mod mysql;
 pub mod postgresql;
+mod gpui_tokio;
 
 // Re-exports
 pub use types::*;

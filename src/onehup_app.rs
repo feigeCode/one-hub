@@ -57,7 +57,7 @@ impl ConnectionType {
     fn icon(&self) -> IconName {
         match self {
             ConnectionType::All => IconName::Menu,
-            ConnectionType::Database => IconName::File,
+            ConnectionType::Database => IconName::DATABASE,
             ConnectionType::SshSftp => IconName::File,
             ConnectionType::Redis => IconName::File,
             ConnectionType::MongoDB => IconName::File,

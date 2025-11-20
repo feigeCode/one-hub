@@ -15,6 +15,7 @@ mod onehup_app;
 mod home;
 mod database_tab;
 mod setting_tab;
+mod db_workspace;
 
 use gpui::*;
 use gpui_component::Root;

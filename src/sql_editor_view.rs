@@ -1,6 +1,6 @@
 use std::sync::{Arc, RwLock};
 use std::any::Any;
-use gpui::{div, px, AnyElement, App, AppContext, ClickEvent, Entity, IntoElement, ParentElement, SharedString, Styled, Window, Focusable, FocusHandle, EventEmitter, Render, Context};
+use gpui::{div, px, AnyElement, App, AppContext, ClickEvent, Entity, IntoElement, ParentElement, SharedString, Styled, Window, Focusable, FocusHandle, EventEmitter, Render, Context, EntityId, WeakEntity, AnyView};
 use gpui_component::{h_flex, v_flex, ActiveTheme, IconName, Sizable, Size};
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::table::{Column, Table, TableState};
@@ -9,8 +9,9 @@ use gpui_component::tab::{Tab, TabBar};
 use gpui_component::resizable::{v_resizable, resizable_panel};
 use gpui_component::list::ListItem;
 use gpui_component::StyledExt;
-use gpui_component::dock::{Panel, PanelEvent, PanelState};
-use db::{GlobalDbState, ExecOptions, SqlResult};
+use gpui_component::dock::{Panel, PanelControl, PanelEvent, PanelState, PanelView, TabPanel, TitleStyle};
+use db::{GlobalDbState, ExecOptions, SqlResult, spawn_result};
+use gpui_component::menu::PopupMenu;
 use crate::sql_editor::SqlEditor;
 use crate::tab_container::{TabContent, TabContentType};
 use crate::tab_contents::{DelegateWrapper};
@@ -38,6 +39,8 @@ pub struct SqlEditorTabContent {
     databases_loading: Arc<std::sync::atomic::AtomicBool>,
     databases_cache: Arc<RwLock<Vec<String>>>,
     databases_loaded: Arc<std::sync::atomic::AtomicBool>,
+    // Add focus handle
+    focus_handle: FocusHandle,
 }
 
 impl SqlEditorTabContent {
@@ -56,6 +59,7 @@ impl SqlEditorTabContent {
         cx: &mut App,
     ) -> Self {
         let editor = cx.new(|cx| SqlEditor::new(window, cx));
+        let focus_handle = cx.focus_handle();
 
         let result_tabs = Arc::new(RwLock::new(Vec::new()));
         let active_result_tab = Arc::new(RwLock::new(0));
@@ -84,6 +88,7 @@ impl SqlEditorTabContent {
             databases_loading,
             databases_cache,
             databases_loaded,
+            focus_handle,
         };
 
         // Subscribe to select events for database switching
@@ -128,31 +133,48 @@ impl SqlEditorTabContent {
             let instance_for_schema = instance.clone();
 
             cx.spawn(async move |cx| {
-                // Wait for connection
-                let max_retries = 10;
-                let mut retries = 0;
-                while retries < max_retries {
-                    if global_state.connection_pool.is_connected().await {
-                        break;
-                    }
-                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                    retries += 1;
-                }
+                // Clone for first async block
+                let global_state_check = global_state.clone();
 
-                if !global_state.connection_pool.is_connected().await {
+                // Use spawn_result to bridge GPUI (smol) and Tokio runtimes
+                let connection_check = spawn_result(async move {
+                    // Wait for connection
+                    let max_retries = 10;
+                    let mut retries = 0;
+                    while retries < max_retries {
+                        if global_state_check.connection_pool.is_connected().await {
+                            return Ok(());
+                        }
+                        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                        retries += 1;
+                    }
+
+                    if global_state_check.connection_pool.is_connected().await {
+                        Ok(())
+                    } else {
+                        Err(anyhow::anyhow!("Failed to connect to database"))
+                    }
+                }).await;
+
+                if connection_check.is_err() {
                     eprintln!("Failed to connect to database for schema loading");
                     return;
                 }
 
-                // Set current database in connection pool
-                global_state.connection_pool
-                    .set_current_database(Some(db_clone.clone()))
-                    .await;
+                // Set current database and update schema using spawn_result
+                let result = spawn_result(async move {
+                    global_state.connection_pool
+                        .set_current_database(Some(db_clone.clone()))
+                        .await;
+                    Ok(db_clone)
+                }).await;
 
-                // Update editor schema
-                cx.update(|cx| {
-                    instance_for_schema.update_schema_for_db(&db_clone, cx);
-                }).ok();
+                if let Ok(db) = result {
+                    // Update editor schema
+                    cx.update(|cx| {
+                        instance_for_schema.update_schema_for_db(&db, cx);
+                    }).ok();
+                }
             }).detach();
         }
 
@@ -1223,6 +1245,96 @@ impl Clone for SqlEditorTabContent {
             databases_loading: self.databases_loading.clone(),
             databases_cache: self.databases_cache.clone(),
             databases_loaded: self.databases_loaded.clone(),
+            focus_handle: self.focus_handle.clone(),
         }
+    }
+}
+
+impl EventEmitter<PanelEvent> for SqlEditorTabContent {}
+
+impl Render for SqlEditorTabContent {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Delegate to render_content for the actual content
+        div()
+            .size_full()
+            .child(self.render_content(window, cx))
+    }
+}
+
+impl Focusable for SqlEditorTabContent {
+    fn focus_handle(&self, _cx: &App) -> FocusHandle {
+        self.focus_handle.clone()
+    }
+}
+
+impl Panel for SqlEditorTabContent {
+    fn panel_name(&self) -> &'static str {
+        "SqlEditor"
+    }
+
+    fn tab_name(&self, cx: &App) -> Option<SharedString> {
+        Some(self.title.clone())
+    }
+
+    fn title(&self, window: &Window, cx: &App) -> AnyElement {
+        h_flex()
+            .items_center()
+            .gap_2()
+            .child(IconName::File)
+            .child(self.title.clone())
+            .into_any_element()
+    }
+
+    fn title_style(&self, cx: &App) -> Option<TitleStyle> {
+        None
+    }
+
+    fn title_suffix(&self, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
+        None
+    }
+
+    fn closable(&self, cx: &App) -> bool {
+        true
+    }
+
+    fn zoomable(&self, cx: &App) -> Option<PanelControl> {
+        None
+    }
+
+    fn visible(&self, cx: &App) -> bool {
+        true
+    }
+
+    fn set_active(&mut self, active: bool, window: &mut Window, cx: &mut App) {
+        // No special handling needed for active state
+    }
+
+    fn set_zoomed(&mut self, zoomed: bool, window: &mut Window, cx: &mut App) {
+        // No special handling needed for zoomed state
+    }
+
+    fn on_added_to(&mut self, tab_panel: WeakEntity<TabPanel>, window: &mut Window, cx: &mut App) {
+        // Load databases when added to tab panel
+        self.load_databases(window, cx);
+    }
+
+    fn on_removed(&mut self, window: &mut Window, cx: &mut App) {
+        // No special handling needed when removed
+    }
+
+    fn dropdown_menu(&self, this: PopupMenu, window: &Window, cx: &App) -> PopupMenu {
+        this
+    }
+
+    fn toolbar_buttons(&self, window: &mut Window, cx: &mut App) -> Option<Vec<Button>> {
+        None
+    }
+
+    fn dump(&self, cx: &App) -> PanelState {
+        PanelState::new(self)
+    }
+
+    fn inner_padding(&self, cx: &App) -> bool {
+        false
     }
 }

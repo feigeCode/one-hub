@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use gpui::{App, AppContext, Context, Entity, IntoElement, InteractiveElement, ParentElement, Render, Styled, Window, div, AnyElement, StatefulInteractiveElement, EventEmitter, SharedString, Focusable, FocusHandle};
+use gpui::{App, AppContext, Context, Entity, IntoElement, InteractiveElement, ParentElement, Render, Styled, Window, div, AnyElement, StatefulInteractiveElement, EventEmitter, SharedString, Focusable, FocusHandle, WeakEntity};
 use gpui_component::{
     ActiveTheme, IconName, StyledExt,
     h_flex,
@@ -11,6 +11,9 @@ use gpui_component::{
 };
 use crate::context_menu_tree::{context_menu_tree, ContextMenuTreeState};
 use db::{GlobalDbState, DbNode, DbNodeType, spawn_result};
+use gpui_component::button::Button;
+use gpui_component::dock::{PanelControl, TabPanel, TitleStyle};
+use gpui_component::menu::PopupMenu;
 use crate::storage::StoredConnection;
 // ============================================================================
 // DbTreeView Events
@@ -789,4 +792,82 @@ impl Render for DbTreeView {
 }
 
 impl EventEmitter<DbTreeViewEvent> for DbTreeView {}
+
+impl EventEmitter<PanelEvent> for DbTreeView {}
+
+impl Focusable for DbTreeView {
+    fn focus_handle(&self, _cx: &App) -> FocusHandle {
+        self.focus_handle.clone()
+    }
+}
+
+impl Panel for DbTreeView {
+    fn panel_name(&self) -> &'static str {
+        "DbTreeView"
+    }
+
+    fn tab_name(&self, cx: &App) -> Option<SharedString> {
+        Some("Database Tree".into())
+    }
+
+    fn title(&self, window: &Window, cx: &App) -> AnyElement {
+        h_flex()
+            .items_center()
+            .gap_2()
+            .child("Database Explorer")
+            .into_any_element()
+    }
+
+    fn title_style(&self, cx: &App) -> Option<TitleStyle> {
+        None
+    }
+
+    fn title_suffix(&self, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
+        None
+    }
+
+    fn closable(&self, cx: &App) -> bool {
+        false
+    }
+
+    fn zoomable(&self, cx: &App) -> Option<PanelControl> {
+        None
+    }
+
+    fn visible(&self, cx: &App) -> bool {
+        true
+    }
+
+    fn set_active(&mut self, active: bool, window: &mut Window, cx: &mut App) {
+        // No special handling needed for active state
+    }
+
+    fn set_zoomed(&mut self, zoomed: bool, window: &mut Window, cx: &mut App) {
+        // No special handling needed for zoomed state
+    }
+
+    fn on_added_to(&mut self, tab_panel: WeakEntity<TabPanel>, window: &mut Window, cx: &mut App) {
+        // No special handling needed when added to tab panel
+    }
+
+    fn on_removed(&mut self, window: &mut Window, cx: &mut App) {
+        // No special handling needed when removed
+    }
+
+    fn dropdown_menu(&self, this: PopupMenu, window: &Window, cx: &App) -> PopupMenu {
+        this
+    }
+
+    fn toolbar_buttons(&self, window: &mut Window, cx: &mut App) -> Option<Vec<Button>> {
+        None
+    }
+
+    fn dump(&self, cx: &App) -> PanelState {
+        PanelState::new(self)
+    }
+
+    fn inner_padding(&self, cx: &App) -> bool {
+        false
+    }
+}
 
