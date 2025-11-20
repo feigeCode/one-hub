@@ -4,7 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-One-Hub is a modern multi-protocol database management GUI built with Rust and GPUI (GPU-accelerated UI framework). It supports MySQL, PostgreSQL, and has architectural support for SQLite, Redis, and MongoDB. The application features SQL editing with syntax highlighting, database object exploration, and data import/export capabilities.
+One-Hub is a modern multi-protocol database management GUI built with Rust and GPUI (GPU-accelerated UI framework). It supports MySQL, PostgreSQL, and has architectural support for SQLite, Redis, and MongoDB. The application features:
+
+- **Two-level tab system**: Top-level tabs for Home/Database/Settings, inner tabs for SQL editors and data views
+- **DockArea workspace**: Flexible panel layout with resizable, collapsible panels
+- **SQL editing with syntax highlighting**: Tree-sitter based highlighting for 20+ languages
+- **Database object exploration**: Lazy-loading hierarchical tree view
+- **Data import/export capabilities**: CSV, JSON, SQL, Markdown, Excel, Word formats (implemented but not yet enabled in UI)
+- **Embedded UI framework**: Full gpui-component source code (~60,000 lines) for complete control
 
 ## Build and Development Commands
 
@@ -19,11 +26,14 @@ One-Hub is a modern multi-protocol database management GUI built with Rust and G
 - `cargo check` - Quick syntax/type checking without building
 
 ### Workspace Structure
-This is a Cargo workspace with four members:
+This is a Cargo workspace with **eight members**:
 - Root crate: `one-hub` (main application)
 - `crates/db` - Database abstraction layer with plugin system
+- `crates/ui` - **Embedded gpui-component source code** (~60,000 lines, 64+ modules)
+- `crates/macros` - Procedural macros for gpui-component
 - `crates/assets` - Embedded SVG icons and assets using rust-embed
 - `crates/core` - Currently empty, intended for shared core logic
+- `crates/mysql`, `crates/postgresql`, `crates/sqlite` - Empty placeholders for future modularization
 
 ## Architecture
 
@@ -55,19 +65,45 @@ The core architectural pattern is a **stateless plugin system** where database o
 
 ### Critical: Async Runtime Bridge
 
-**TOKIO_RUNTIME** (`crates/db/src/runtime.rs`):
-- GPUI uses **smol** executor, but SQLx requires **Tokio** runtime
-- Global Tokio runtime bridges the two: `TOKIO_RUNTIME.spawn()` or `spawn_result()`
-- When writing async database code in GPUI contexts, always use `spawn_result()` helper
-- Pattern:
-  ```rust
-  cx.spawn(|this, mut cx| async move {
-      let result = spawn_result(async {
-          // SQLx async operations here
-      }).await;
-      // Update UI with result
-  })
-  ```
+**IMPORTANT: New Architecture - gpui_tokio.rs**
+
+**Location**: `crates/db/src/gpui_tokio.rs`
+
+GPUI uses **smol** executor, but SQLx requires **Tokio** runtime. The new architecture bridges the two more elegantly:
+
+**GlobalTokio State**:
+- Holds a 2-worker Tokio runtime instance
+- Initialized once at app startup via `db::gpui_tokio::init(cx)`
+
+**Tokio API** (integrates with GPUI Context):
+```rust
+use db::gpui_tokio::Tokio;
+
+// In GPUI components, use Tokio::spawn_result()
+cx.spawn(|this, mut cx| async move {
+    let result = Tokio::spawn_result(&cx, async {
+        // SQLx async operations here
+        connection.query("SELECT * FROM users").await
+    }).await?;
+
+    // Update UI with result
+    this.update(&mut cx, |this, cx| {
+        this.data = result;
+        cx.notify();
+    })
+})
+```
+
+**Key Benefits**:
+- Returns GPUI `Task<T>` instead of Tokio `JoinHandle<T>`
+- Integrated with GPUI Context system
+- Unified error handling with `anyhow::Result`
+- No need to manually access runtime handle
+
+**Initialization** (in `main.rs`):
+```rust
+db::gpui_tokio::init(&mut cx);  // Must be called before any database operations
+```
 
 ### SQL Execution & Parsing
 
@@ -87,28 +123,109 @@ The core architectural pattern is a **stateless plugin system** where database o
 
 ### UI Architecture (src/)
 
+**Two-Level Tab System**:
+
+The application uses a unique two-level tab architecture for flexible workspace management:
+
+**Level 1 - Top-Level Tabs** (managed by `OneHupApp`):
+- `HomeTabContent` (`src/home.rs`): Connection cards in 3-column grid layout, non-closeable
+- `DatabaseTabContent` (`src/database_tab.rs`): Database workspace with DockArea, one per connection
+- `SettingsTabContent` (`src/setting_tab.rs`): Application settings, closeable
+
+**Level 2 - Database Inner Tabs** (managed by `DatabaseTabContent`):
+- `SqlEditorTabContent`: SQL editor with syntax highlighting
+- `TableDataTabContent`: Table data grid view
+- `TableStructureTabContent`: Table columns, indexes, constraints
+- `ViewDataTabContent`: View data display
+- `QueryResultTabContent`: Query execution results
+
+**Why Two Levels?**
+- Users can work with multiple database connections simultaneously
+- Each database connection has its own isolated workspace
+- Home tab provides quick access to all connections
+- Tab bar positioned 80px from left edge to avoid macOS traffic lights
+
 **Main Application Flow**:
-1. `main.rs` - Initializes GPUI, registers Assets, creates main window (1600x1200)
-2. `onehup_app.rs` - Root application state with connection filtering and tab management
-3. `app_view.rs` - Main workspace orchestrating tree view, connection form, and tab container
+1. `main.rs` - Initializes GPUI, registers Assets, initializes `db::gpui_tokio`, wraps app in `Root` for sheets/dialogs
+2. `onehup_app.rs` - Root application state with connection filtering, top-level tab management
+3. `home.rs` - Home tab showing connection cards
+4. `database_tab.rs` - Database workspace with DockArea system
+5. `setting_tab.rs` - Settings interface (placeholder)
 
 **Key UI Components**:
-- `DbTreeView` (`src/db_tree_view.rs`) - Lazy-loading hierarchical tree
+- `DbTreeView` (`src/db_tree_view.rs`) - Lazy-loading hierarchical tree with PanelView integration
   - Maintains `loaded_children` and `loading_nodes` sets for optimization
+  - Implements `PanelView` trait for DockArea compatibility
   - Emits events: `OpenTableData`, `OpenTableStructure`, `OpenViewData`, `ConnectToConnection`, `CreateNewQuery`
   - Node IDs format: `<connection_id>:<database>:<folder_type>:<object_name>`
 
-- `TabContainer` (`src/tab_container.rs`) - Strategy pattern for tab management
-  - `TabContent` trait allows different content types (SqlEditor, TableData, TableForm, QueryResult)
-  - Supports multiple tabs with active tab tracking
+- `DatabaseTabContent` (`src/database_tab.rs`) - DockArea-based database workspace
+  - **Left panel**: DbTreeView (280px width, collapsible)
+  - **Center panel**: TabPanel for SQL editors and data views
+  - `DatabaseEventHandler`: Subscribes to tree events, creates corresponding tabs
+  - Async connection with loading state and error display
+  - Auto-connects on tab creation, disconnects on tab close
+
+- `DbWorkspace` (`src/db_workspace.rs`) - Experimental/advanced workspace implementation
+  - Layout versioning system (current: v5)
+  - Layout persistence to JSON file
+  - More flexible DockArea configuration
+  - May replace `DatabaseTabContent` in future
+
+- `TabContainer` (`src/tab_container.rs`) - Customizable tab management
+  - Strategy pattern with `TabContent` trait
+  - Color customization API: `with_tab_bar_colors()`, `with_tab_item_colors()`, `with_tab_content_colors()`
+  - Tab type checking: `has_tab_type()`
+  - Drag-and-drop tab reordering
+  - Right-click context menu
 
 - `SqlEditorTabContent` (`src/sql_editor_view.rs`) - SQL editing with tree-sitter syntax highlighting
   - Database selector dropdown, execute button, multi-result tabs
   - Displays execution time and row counts
+  - Based on gpui-component's advanced Input component with LSP support
 
 - `DbConnectionForm` (`src/db_connection_form.rs`) - Connection configuration UI
   - Supports MySQL and PostgreSQL with test connection functionality
   - Integrates with ConnectionStore for persistence
+
+### Embedded UI Framework (crates/ui/)
+
+**Major Architectural Decision**: The project embeds the complete gpui-component source code (~60,000 lines) instead of using it as an external dependency.
+
+**Why Embed?**
+1. **Complete control**: Can modify and extend components freely
+2. **Faster iteration**: No waiting for upstream library updates
+3. **Better IDE support**: Jump to component source directly
+4. **Custom requirements**: Database tools need specific UI customizations
+
+**Key Subsystems**:
+
+**DockArea System** (`crates/ui/src/dock/`):
+- Resizable, collapsible panels with 4 dock edges (left, right, top, bottom)
+- `TabPanel` and `StackPanel` for different content arrangements
+- Layout state serialization for persistence
+- Used by `DatabaseTabContent` and `DbWorkspace`
+
+**Advanced Input** (`crates/ui/src/input/`):
+- 20+ files implementing a full-featured code editor
+- Ropey-based text buffer for efficient editing
+- LSP integration: completions, hover, diagnostics, code actions
+- Tree-sitter syntax highlighting
+- Multi-cursor support, search/replace
+- Used as base for SQL editor
+
+**Highlighter** (`crates/ui/src/highlighter/`):
+- Tree-sitter integration for 20+ languages
+- SQL, Rust, JavaScript, Python, Go, Java, etc.
+- Theme-based syntax coloring
+- Diagnostic display
+
+**Other Components**:
+- Table, List, Tree (virtual rendering for performance)
+- Theme system (JSON-based, light/dark modes)
+- Form inputs, dialogs, menus, popovers
+- Charts (line, bar, area, pie)
+- WebView support
 
 ### Storage Layer (src/storage/)
 
@@ -138,6 +255,8 @@ The core architectural pattern is a **stateless plugin system** where database o
 - JSON (array of objects/arrays, NDJSON support)
 - SQL (raw scripts)
 
+**Status**: Fully implemented but **not yet enabled in UI**. Code exists in `src/data_export.rs` and `src/data_import.rs`.
+
 **Key Functions**:
 - `export_to_path()` - Write to file with directory creation
 - `export_to_bytes()` - Return as UTF-8 bytes
@@ -145,13 +264,50 @@ The core architectural pattern is a **stateless plugin system** where database o
 
 ## Key Design Patterns
 
-### 1. Stateless Plugins with Connection References
+### 1. Two-Level Tab Architecture
+**Top-level tabs**: Application navigation (Home, Database connections, Settings)
+**Inner tabs**: Database workspace content (SQL editors, table data, query results)
+
+This allows users to work with multiple database connections simultaneously, each with its own isolated workspace.
+
+### 2. Event-Driven Component Communication
+**Pattern**: `DatabaseEventHandler` subscribes to `DbTreeViewEvent`, automatically creates corresponding tabs
+
+**Event Flow**:
+```
+DbTreeView (user double-clicks table)
+  ↓ emits DbTreeViewEvent::OpenTableData
+DatabaseEventHandler (subscription handler)
+  ↓ creates TableDataTabContent
+DockArea center panel
+  ↓ adds new tab
+User sees table data
+```
+
+**Benefits**:
+- Loose coupling between tree view and tab container
+- Easy to add new event types
+- Clean separation of concerns
+
+### 3. PanelView Integration
+`DbTreeView` implements `PanelView` trait to integrate with DockArea:
+```rust
+impl PanelView for DbTreeView {
+    fn title(&self, cx: &WindowContext) -> AnyElement;
+    fn ui_size(&self, cx: &WindowContext) -> Size<Length>;
+    fn dump(&self, cx: &AppContext) -> PanelState;
+}
+```
+
+This allows the tree view to be used as a collapsible dock panel with serializable state.
+
+### 4. Stateless Plugins with Connection References
 Plugins don't maintain state. They accept `&dyn DbConnection` for each operation, enabling:
 - Flexible connection pooling and switching
 - Thread-safe connection sharing via Arc<RwLock<>>
 - Easy testing and plugin isolation
 
-### 2. Two-Phase SQL Execution
+### 5. SQL Generation Before Execution
 Database plugins generate SQL strings first, allowing user review before execution:
 1. Call `create_table()` → returns SQL string
 2. Display SQL to user
@@ -159,28 +315,52 @@ Database plugins generate SQL strings first, allowing user review before executi
 
 This is critical for DDL operations where mistakes can be destructive.
 
-### 3. Hierarchical Node IDs for Tree Navigation
+### 6. Hierarchical Node IDs for Tree Navigation
 Tree nodes use structured IDs: `<connection_id>:<database>:<folder_type>:<object_name>`
 - Example: `conn_mysql:mydb:table_folder:users`
 - Enables efficient lazy loading and context tracking
 - Folder types: `table_folder`, `view_folder`, `function_folder`, `procedure_folder`, `trigger_folder`, `sequence_folder` (PostgreSQL only)
 
-### 4. Lazy Loading Tree with State Tracking
+### 7. Lazy Loading Tree with State Tracking
 `DbTreeView` optimizes performance by:
 - Only loading visible nodes initially
 - Tracking `loaded_children` to avoid redundant queries
 - Using `loading_nodes` to prevent concurrent loading of same node
 - Calling `plugin.build_database_tree()` for databases, `plugin.load_node_children()` for sub-objects
 
-### 5. Tab Strategy Pattern
+### 8. Tab Strategy Pattern with Color Customization
 Different tab content types implement `TabContent` trait:
+- `HomeTabContent` - Connection cards grid (non-closeable)
+- `DatabaseTabContent` - Database workspace (closeable)
+- `SettingsTabContent` - Settings interface (closeable)
 - `SqlEditor` - SQL editing interface
 - `TableData` - Data grid display
 - `TableForm` - Table structure (columns, indexes, constraints)
 - `QueryResult` - Query execution results
 - `Custom(String)` - Extensible for future types
 
+**Color Customization**:
+`TabContainer` supports full color customization via builder pattern:
+```rust
+TabContainer::new(cx)
+    .with_tab_bar_colors(bg_color, border_color)
+    .with_tab_item_colors(active_bg, hover_bg)
+    .with_tab_content_colors(text_color, close_color)
+```
+
 `TabContainer` manages all tabs uniformly without knowing specific content details.
+
+### 9. DockArea Flexible Layout System
+DatabaseTabContent uses DockArea for panel management:
+- Left dock: DbTreeView (280px, collapsible)
+- Center: TabPanel for inner tabs
+- Configurable collapsible edges
+- Layout state serialization
+
+DbWorkspace adds:
+- Layout versioning (current: v5)
+- Persistence to JSON file
+- Version mismatch detection prompts user to reset layout
 
 ## Database-Specific Notes
 
@@ -275,7 +455,7 @@ To add a new database type (e.g., SQLite, Redis, MongoDB):
 
 ### 1. Async Runtime Mismatch
 **Problem**: GPUI uses smol, SQLx uses Tokio
-**Solution**: Always use `spawn_result()` from `crates/db/src/runtime.rs` when calling SQLx operations from GPUI contexts
+**Solution**: Always use `Tokio::spawn_result()` from `crates/db/src/gpui_tokio.rs` when calling SQLx operations from GPUI contexts. Initialize with `db::gpui_tokio::init(cx)` at app startup.
 
 ### 2. Connection Lifetime in UI
 **Problem**: Cannot hold database connection across async boundaries
@@ -293,18 +473,53 @@ To add a new database type (e.g., SQLite, Redis, MongoDB):
 **Problem**: Hardcoded SQL won't work across databases
 **Solution**: Each plugin generates its own SQL with proper identifier quoting (backticks for MySQL, double quotes for PostgreSQL)
 
+### 6. Two-Level Tab Confusion
+**Problem**: Adding tabs to wrong container
+**Solution**:
+- Use `OneHupApp.tab_container` for top-level tabs (Home, Database, Settings)
+- Use `DatabaseTabContent.dock_area` center panel for database inner tabs (SQL editors, table data)
+
+### 7. Event Handler Subscription
+**Problem**: Tree events not reaching tab container
+**Solution**: Use `DatabaseEventHandler` pattern - subscribe to tree events in handler, create tabs in response
+
 ## Code Location Reference
 
 When working on specific features, know where to look:
 
+**Application Structure**:
+- **Main entry**: `src/main.rs`
+- **Root app state**: `src/onehup_app.rs`
+- **Home tab**: `src/home.rs`
+- **Database workspace**: `src/database_tab.rs`
+- **Advanced workspace**: `src/db_workspace.rs` (experimental)
+- **Settings tab**: `src/setting_tab.rs`
+
+**Database Layer**:
 - **Database plugin logic**: `crates/db/src/<dbname>/plugin.rs`
 - **Connection management**: `crates/db/src/<dbname>/connection.rs`
+- **Async runtime bridge**: `crates/db/src/gpui_tokio.rs` ⚠️ **NEW**
+- **SQL parsing**: `crates/db/src/executor.rs`
+- **Type definitions**: `crates/db/src/types.rs`
+- **Manager & pool**: `crates/db/src/manager.rs`
+
+**UI Components**:
 - **UI tree navigation**: `src/db_tree_view.rs`
 - **SQL editor**: `src/sql_editor_view.rs`, `src/sql_editor.rs`
 - **Tab management**: `src/tab_container.rs`, `src/tab_contents.rs`
 - **Connection forms**: `src/db_connection_form.rs`
+
+**UI Framework** (embedded):
+- **DockArea**: `crates/ui/src/dock/`
+- **Advanced Input**: `crates/ui/src/input/`
+- **Highlighter**: `crates/ui/src/highlighter/`
+- **Table/List/Tree**: `crates/ui/src/{table,list,tree}/`
+- **Theme system**: `crates/ui/src/theme/`
+
+**Storage & Data**:
 - **Persistent storage**: `src/storage/sqlite_backend.rs`
-- **Import/Export**: `src/data_export.rs`, `src/data_import.rs`
-- **Async runtime bridge**: `crates/db/src/runtime.rs`
-- **SQL parsing**: `crates/db/src/executor.rs`
-- **Type definitions**: `crates/db/src/types.rs`
+- **Connection store**: `src/connection_store.rs`
+- **Import/Export**: `src/data_export.rs`, `src/data_import.rs` (not yet enabled)
+
+**Assets**:
+- **Icons**: `crates/assets/assets/icons/`

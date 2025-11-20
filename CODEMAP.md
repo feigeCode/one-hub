@@ -29,18 +29,22 @@ gpui-component（crates/ui下为框架核心源码，crates/story为各个组件
 one-hub/
 ├── src/                          # 主应用程序
 │   ├── main.rs                   # 程序入口
-│   ├── onehup_app.rs             # 应用状态管理与 UI 布局
-│   ├── db_tree_view.rs           # 数据库树形导航
+│   ├── onehup_app.rs             # 应用状态管理与顶层标签页系统
+│   ├── home.rs                   # 首页标签页内容（连接卡片网格）
+│   ├── database_tab.rs           # 数据库标签页内容（DockArea 工作区）
+│   ├── db_workspace.rs           # 数据库工作区（实验性/高级实现）
+│   ├── setting_tab.rs            # 设置标签页内容
+│   ├── db_tree_view.rs           # 数据库树形导航（PanelView 实现）
 │   ├── sql_editor_view.rs        # SQL 编辑器标签页
 │   ├── sql_editor.rs             # 文本编辑器组件
-│   ├── tab_container.rs          # 标签页容器系统
-│   ├── tab_contents.rs           # 标签页内容实现
+│   ├── tab_container.rs          # 标签页容器系统（支持颜色自定义）
+│   ├── tab_contents.rs           # 标签页内容实现（表数据、表结构等）
 │   ├── db_connection_form.rs     # 数据库连接表单
 │   ├── connection_store.rs       # 连接配置持久化
 │   ├── context_menu_tree.rs      # 树形菜单右键支持
 │   ├── themes.rs                 # 主题管理
-│   ├── data_export.rs            # 数据导出(多格式)
-│   ├── data_import.rs            # 数据导入(多格式)
+│   ├── data_export.rs            # 数据导出(多格式，未启用)
+│   ├── data_import.rs            # 数据导入(多格式，未启用)
 │   └── storage/                  # 存储层
 │       ├── mod.rs
 │       ├── traits.rs             # Storage/Queryable trait
@@ -48,6 +52,23 @@ one-hub/
 │       └── sqlite_backend.rs     # SQLite 实现
 │
 ├── crates/
+│   ├── ui/                       # gpui-component 组件库源码（已嵌入）
+│   │   ├── src/
+│   │   │   ├── dock/             # DockArea 停靠面板系统
+│   │   │   ├── input/            # 高级输入组件（支持 LSP）
+│   │   │   ├── highlighter/      # 语法高亮（tree-sitter）
+│   │   │   ├── list/             # 虚拟列表组件
+│   │   │   ├── menu/             # 菜单组件
+│   │   │   ├── table/            # 数据表格组件
+│   │   │   ├── tree/             # 树形组件
+│   │   │   ├── theme/            # 主题系统
+│   │   │   └── ... (60+ 组件模块)
+│   │   └── Cargo.toml
+│   │
+│   ├── macros/                   # gpui-component 宏
+│   │   ├── src/lib.rs
+│   │   └── Cargo.toml
+│   │
 │   ├── db/                       # 数据库抽象层(核心)
 │   │   ├── src/
 │   │   │   ├── lib.rs
@@ -56,7 +77,7 @@ one-hub/
 │   │   │   ├── executor.rs       # SQL 执行与解析
 │   │   │   ├── types.rs          # 数据模型与请求/响应类型
 │   │   │   ├── manager.rs        # DbManager 与连接池
-│   │   │   ├── runtime.rs        # Tokio 运行时桥接
+│   │   │   ├── gpui_tokio.rs     # GPUI/Tokio 运行时桥接（新）
 │   │   │   ├── mysql/
 │   │   │   │   ├── mod.rs
 │   │   │   │   ├── plugin.rs     # MySQL 插件实现
@@ -70,6 +91,7 @@ one-hub/
 │   ├── assets/                   # 嵌入式资源
 │   │   ├── src/lib.rs            # rust-embed 资源加载
 │   │   ├── assets/               # SVG 图标等静态资源
+│   │   │   └── icons/            # 数据库、表、视图等图标
 │   │   └── Cargo.toml
 │   │
 │   ├── core/                     # 核心逻辑(预留)
@@ -79,7 +101,7 @@ one-hub/
 │   ├── postgresql/               # PostgreSQL 专用模块(占位)
 │   └── sqlite/                   # SQLite 专用模块(占位)
 │
-├── Cargo.toml                    # 工作区配置
+├── Cargo.toml                    # 工作区配置（8 个成员）
 ├── CLAUDE.md                     # 开发指南
 └── CODEMAP.md                    # 本文档
 ```
@@ -119,18 +141,33 @@ App::new()
 
 ---
 
-### 2. 应用状态管理 (`src/onehup_app.rs`)
+### 2. 应用状态管理 (`src/onehup_app.rs` - 448 行)
 
-**职责**: 核心 UI 布局、状态管理和用户交互
+**职责**: 顶层标签页系统、连接管理和 UI 布局
+
+#### 核心架构：两级标签页系统
+
+**第一级 - 顶层标签页** (由 OneHupApp 管理):
+- **Home 标签**: 连接卡片网格，不可关闭
+- **Database 标签**: 每个数据库连接一个标签页
+- **Settings 标签**: 设置界面
+
+**第二级 - 数据库内标签页** (由 DatabaseTabContent 管理):
+- SQL 编辑器标签
+- 表数据标签
+- 表结构标签
+- 视图数据标签
 
 #### 核心结构
 
 **OneHupApp**:
 ```rust
 pub struct OneHupApp {
-    selected_filter: ConnectionType,      // 当前选中的连接类型过滤器
-    connections: Vec<StoredConnection>,   // 所有连接配置
-    tab_container: View<TabContainer>,    // 标签页容器
+    selected_filter: ConnectionType,              // 左侧过滤器状态
+    connections: Vec<ConnectionInfo>,             // 所有连接配置
+    tab_container: Entity<TabContainer>,          // 顶层标签页容器
+    connection_form: Option<Entity<DbConnectionForm>>,  // 新建连接表单
+    connection_store: ConnectionStore,            // SQLite 持久化
 }
 ```
 
@@ -138,82 +175,222 @@ pub struct OneHupApp {
 ```rust
 pub enum ConnectionType {
     All,            // 所有连接
-    Database,       // 关系型数据库
+    Database,       // 关系型数据库 (MySQL, PostgreSQL)
     SshSftp,        // SSH/SFTP (预留)
     Redis,          // Redis (预留)
     MongoDB,        // MongoDB (预留)
 }
 ```
 
-**TabContent 类型**:
-- `HomeTabContent`: 首页，显示连接卡片网格
-- `ConnectionsTabContent`: 连接列表视图
+**顶层 TabContent 类型**:
+- `HomeTabContent`: 首页，3 列连接卡片网格
+- `DatabaseTabContent`: 数据库工作区（DockArea + 树形视图 + 内层标签页）
 - `SettingsTabContent`: 设置界面
 
 #### UI 布局
 
-1. **顶部工具栏**:
-   - NEW HOST 按钮: 创建新连接
-   - TERMINAL, SERIAL 按钮 (预留)
-   - 右侧: 视图切换、设置按钮、用户头像
+```
+┌─────────────────────────────────────────────────────┐
+│  [NEW HOST] [TERMINAL] [SERIAL]     [@] [☰] [Settings] │  ← 顶部工具栏
+├──────┬──────────────────────────────────────────────┤
+│      │ [Home] [MySQL-Prod] [PG-Dev] [Settings] +    │  ← 顶层标签栏（左侧留 80px 避开 macOS 红绿灯）
+│      │                                               │
+│ [≡]  │  ┌─────────────────────────────────────┐    │
+│ All  │  │ 标签页内容区域                         │    │
+│      │  │ (首页卡片/数据库工作区/设置)             │    │
+│ [DB] │  │                                      │    │
+│      │  └─────────────────────────────────────┘    │
+│ SSH  │                                               │
+│      │                                               │
+│ Redis│                                               │
+│      │                                               │
+│ Mongo│                                               │
+│      │                                               │
+│ [@]  │                                               │
+└──────┴──────────────────────────────────────────────┘
+```
 
-2. **左侧边栏**:
-   - 连接类型过滤器 (All, Database, SSH/SFTP, Redis, MongoDB)
-   - 筛选按钮显示当前选中数量
+1. **顶部工具栏**:
+   - NEW HOST 按钮: 显示连接表单 Sheet
+   - TERMINAL, SERIAL 按钮 (预留功能)
+   - 右侧: 设置按钮、用户头像
+
+2. **左侧边栏** (可折叠):
+   - 连接类型过滤器图标
+   - 主题切换按钮
+   - 用户信息区域
 
 3. **中心内容区**:
-   - 标签页容器，动态渲染首页/连接列表/设置页
-
-4. **底部状态栏**:
-   - 用户信息区域
+   - 顶层标签栏 (TabContainer)
+   - 标签页内容 (HomeTabContent / DatabaseTabContent / SettingsTabContent)
 
 #### 核心方法
 
-- `new(cx)`: 初始化应用，创建标签页容器
+- `new(cx)`: 初始化应用，加载连接列表，创建 Home 标签
 - `render_toolbar()`: 渲染顶部工具栏
 - `render_left_sidebar()`: 渲染左侧过滤器
-- `render_home_content()`: 渲染首页连接卡片
-- `render_connections_content()`: 渲染连接列表
+- `show_connection_form()`: 显示新建连接 Sheet
+- `open_or_activate_database_tab()`: 打开或激活数据库标签页
 - `toggle_theme()`: 切换亮色/暗色主题
+- `filtered_connections()`: 根据过滤器返回连接列表
 
 ---
 
-### 3. 数据库tabContent视图 (`src/database_tab.rs`)
+### 3. 首页标签页 (`src/home.rs` - 166 行) - 新增
 
-**职责**: 协调数据库交互、连接管理和标签页创建
+**职责**: 显示所有连接的卡片网格，作为应用主入口
+
+#### 核心结构
+
+**HomeTabContent**:
+```rust
+pub struct HomeTabContent {
+    connections: Vec<ConnectionInfo>,  // 连接列表
+}
+```
+
+#### UI 特性
+
+1. **3 列网格布局**: 自适应卡片大小
+2. **连接卡片**: 显示连接名称、类型图标、主机、端口、用户名、数据库
+3. **颜色编码**:
+   - Database (MySQL/PostgreSQL): 蓝色图标
+   - SSH/SFTP: 强调色图标
+   - Redis: 红色图标
+   - MongoDB: 绿色图标
+4. **点击连接**: 发出事件，由 OneHupApp 打开或激活对应数据库标签页
+
+#### TabContent 实现
+
+```rust
+impl TabContent for HomeTabContent {
+    fn title(&self) -> SharedString { "Home".into() }
+    fn closeable(&self) -> bool { false }  // 首页不可关闭
+    fn tab_type(&self) -> TabContentType { TabContentType::Home }
+}
+```
+
+---
+
+### 4. 数据库标签页 (`src/database_tab.rs` - 432 行) - 重大重构
+
+**职责**: 数据库工作区，集成 DockArea 面板系统
 
 #### 核心结构
 
 **DatabaseTabContent**:
 ```rust
 pub struct DatabaseTabContent {
-   connection_info: ConnectionInfo,
-   db_tree_view: Entity<crate::db_tree_view::DbTreeView>,
-   inner_tab_container: Entity<TabContainer>,
-   status_msg: Entity<String>,
-   is_connected: Entity<bool>,
-   event_handler: Entity<DatabaseEventHandler>,
+    connection_info: ConnectionInfo,              // 连接配置
+    dock_area: View<DockArea>,                    // DockArea 面板系统
+    db_tree_view: View<DbTreeView>,               // 左侧数据库树
+    connection_id: String,                        // 连接 ID
+    is_connected: bool,                           // 连接状态
+    status_msg: Option<String>,                   // 状态消息
+    event_handler: View<DatabaseEventHandler>,    // 事件处理器
 }
 ```
 
+#### DockArea 布局
+
+```
+┌─────────────────────────────────────────────────┐
+│ ┌─树形视图─┐  ┌──────SQL 编辑器/表数据──────┐ │
+│ │          │  │ [Query1] [Users] [Orders]   │ │
+│ │ ├─Databases│  │                            │ │
+│ │ ├─Tables │  │  SELECT * FROM users;       │ │
+│ │ ├─Views  │  │                            │ │
+│ │ ├─Functions│  │                            │ │
+│ │ └─Procedures│ │                            │ │
+│ │ 280px    │  │                            │ │
+│ └──────────┘  └────────────────────────────┘ │
+└─────────────────────────────────────────────────┘
+```
+
+**DockArea 配置**:
+- **左侧面板**: DbTreeView (280px 宽，可折叠)
+- **中心面板**: SQL 编辑器和数据查看器 (TabPanel)
+- **可折叠边缘**: left=true, bottom=false, right=false
+
 #### 核心功能
 
-1. **连接管理**:
-   - 创建并缓存数据库连接 (`active_connections`)
-   - 支持多个同时打开的连接
-   - 连接切换和状态追踪
+1. **异步连接**:
+   - 创建连接时显示加载动画
+   - 连接成功后加载数据库树
+   - 连接失败显示错误信息
 
-2. **事件订阅**:
-   - 订阅 `DbTreeView` 事件 (打开表数据、视图、创建查询等)
-   - 订阅连接表单事件 (保存/测试连接)
+2. **事件驱动架构**:
+   - `DatabaseEventHandler` 订阅 `DbTreeViewEvent`
+   - 事件类型: `OpenTableData`, `OpenTableStructure`, `OpenViewData`, `CreateNewQuery`
+   - 自动创建对应标签页并添加到 DockArea 中心面板
 
-3. **UI 布局**: 三栏布局 (左侧树 + 中心标签页 + 顶部表单)
+3. **连接生命周期**:
+   - 标签页创建时自动连接
+   - 标签页关闭时断开连接
+   - 连接池统一管理
+
+#### TabContent 实现
+
+```rust
+impl TabContent for DatabaseTabContent {
+    fn title(&self) -> SharedString { self.connection_info.name.clone().into() }
+    fn closeable(&self) -> bool { true }  // 数据库标签页可关闭
+    fn tab_type(&self) -> TabContentType { TabContentType::Database }
+}
+```
 
 ---
 
-### 4. 数据库树形导航 (`src/db_tree_view.rs`)
+### 5. 数据库工作区 (`src/db_workspace.rs` - 685 行) - 实验性实现
 
-**职责**: 分层展示数据库对象，支持懒加载
+**职责**: 高级数据库工作区实现（备选架构）
+
+**注**: 此文件是 DatabaseTabContent 的更高级版本，具有以下特性:
+
+#### 独特特性
+
+1. **布局版本控制**:
+   - 当前版本: v5
+   - 版本不匹配时提示用户重置布局
+
+2. **布局持久化**:
+   - Debug 模式: `target/docks.json`
+   - Release 模式: `docks.json`
+   - 保存面板尺寸、位置、标签页状态
+
+3. **更灵活的 DockArea 配置**:
+   - 支持 4 个停靠边缘 (left, right, top, bottom)
+   - 自定义标签栏颜色
+   - 自定义面板边框和背景
+
+4. **生命周期管理**:
+   - `open_or_activate_tab()`: 智能标签页去重
+   - 连接状态持久化
+
+**用途**: 可能用于未来替换 DatabaseTabContent，或作为高级用户的可选模式
+
+---
+
+### 6. 设置标签页 (`src/setting_tab.rs` - 55 行) - 新增
+
+**职责**: 应用设置界面
+
+**状态**: 占位实现，基础 UI 结构已完成
+
+**TabContent 实现**:
+```rust
+impl TabContent for SettingsTabContent {
+    fn title(&self) -> SharedString { "Settings".into() }
+    fn closeable(&self) -> bool { true }
+    fn tab_type(&self) -> TabContentType { TabContentType::Settings }
+}
+```
+
+---
+
+### 7. 数据库树形导航 (`src/db_tree_view.rs` - 873 行)
+
+**职责**: 分层展示数据库对象，支持懒加载，实现 PanelView 接口
 
 #### 核心结构
 
@@ -225,6 +402,25 @@ pub struct DbTreeView {
     nodes: HashMap<String, DbNode>,         // 节点缓存
     loaded_children: HashSet<String>,       // 已加载子节点的节点集合
     loading_nodes: HashSet<String>,         // 正在加载的节点集合
+}
+```
+
+#### PanelView 集成
+
+**实现 PanelView trait** (用于 DockArea 面板系统):
+```rust
+impl PanelView for DbTreeView {
+    fn title(&self, cx: &WindowContext) -> AnyElement {
+        // 返回面板标题（"Database Explorer"）
+    }
+
+    fn ui_size(&self, cx: &WindowContext) -> Size<Length> {
+        // 返回面板尺寸约束
+    }
+
+    fn dump(&self, cx: &AppContext) -> PanelState {
+        // 序列化面板状态用于持久化
+    }
 }
 ```
 
@@ -265,7 +461,7 @@ Connection
 
 ---
 
-### 5. SQL 编辑器 (`src/sql_editor_view.rs`, `src/sql_editor.rs`)
+### 8. SQL 编辑器 (`src/sql_editor_view.rs`, `src/sql_editor.rs`)
 
 #### sql_editor_view.rs - SQL 编辑器标签页
 
@@ -299,9 +495,9 @@ pub struct SqlEditorTabContent {
 
 ---
 
-### 6. 标签页系统 (`src/tab_container.rs`, `src/tab_contents.rs`)
+### 9. 标签页系统 (`src/tab_container.rs`, `src/tab_contents.rs`)
 
-#### tab_container.rs - 标签页容器
+#### tab_container.rs - 标签页容器 (544 行，增强版)
 
 **TabContent Trait** (策略模式):
 ```rust
@@ -316,6 +512,9 @@ pub trait TabContent: 'static {
 **TabContentType 枚举**:
 ```rust
 pub enum TabContentType {
+    Home,              // 首页 (新增)
+    Database,          // 数据库工作区 (新增)
+    Settings,          // 设置页 (新增)
     SqlEditor,
     TableData,
     TableForm,
@@ -329,6 +528,13 @@ pub enum TabContentType {
 pub struct TabContainer {
     tabs: Vec<TabItem>,
     active_tab: Option<usize>,
+    // 颜色自定义 (新增)
+    tab_bar_bg_color: Option<Hsla>,
+    tab_bar_border_color: Option<Hsla>,
+    active_tab_bg_color: Option<Hsla>,
+    hover_tab_bg_color: Option<Hsla>,
+    tab_text_color: Option<Hsla>,
+    close_button_color: Option<Hsla>,
 }
 
 pub struct TabItem {
@@ -337,6 +543,12 @@ pub struct TabItem {
     content: Box<dyn TabContent>,
 }
 ```
+
+**新增功能**:
+- **颜色自定义 API**: `with_tab_bar_colors()`, `with_tab_item_colors()`, `with_tab_content_colors()`
+- **标签页类型查询**: `has_tab_type()` 检查是否存在特定类型标签页
+- **拖拽支持**: 标签页重排
+- **右键菜单**: 关闭、关闭其他、关闭全部
 
 #### tab_contents.rs - 标签页内容实现
 
@@ -354,7 +566,7 @@ pub struct TabItem {
 
 ---
 
-### 7. 连接管理 (`src/db_connection_form.rs`, `src/connection_store.rs`)
+### 10. 连接管理 (`src/db_connection_form.rs`, `src/connection_store.rs`)
 
 #### db_connection_form.rs - 连接表单
 
@@ -407,7 +619,7 @@ pub struct ConnectionStore {
 
 ---
 
-### 8. 存储层 (`src/storage/`)
+### 11. 存储层 (`src/storage/`)
 
 #### traits.rs - 抽象接口
 
@@ -475,7 +687,7 @@ pub struct SqliteStorage<T> {
 
 ---
 
-### 9. 数据导入导出 (`src/data_export.rs`, `src/data_import.rs`)
+### 12. 数据导入导出 (`src/data_export.rs`, `src/data_import.rs`) - 未启用
 
 #### data_export.rs - 多格式导出
 
@@ -554,7 +766,7 @@ pub enum KeyExtraction {
 
 ---
 
-### 10. 数据库抽象层 (`crates/db/`)
+### 13. 数据库抽象层 (`crates/db/`)
 
 #### plugin.rs - DatabasePlugin Trait
 
@@ -792,31 +1004,69 @@ pub struct GlobalDbState {
 }
 ```
 
-#### runtime.rs - Tokio 运行时桥接
+#### gpui_tokio.rs - GPUI/Tokio 运行时桥接（新架构）
 
-**TOKIO_RUNTIME**:
+**问题**: GPUI 使用 smol 执行器，SQLx 需要 Tokio 运行时
+
+**解决方案**: 全局 Tokio 运行时 + GPUI 上下文集成
+
+**GlobalTokio**:
 ```rust
-pub static TOKIO_RUNTIME: Lazy<Runtime> = Lazy::new(|| {
-    tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(4)
-        .enable_all()
-        .build()
-        .expect("Failed to create Tokio runtime")
-});
+pub struct GlobalTokio {
+    runtime: tokio::runtime::Runtime,  // 2-worker Tokio runtime
+}
+
+pub struct Tokio;
 ```
 
-**spawn_result 辅助函数**:
+**初始化** (在 main.rs 中调用):
 ```rust
-pub async fn spawn_result<F, T>(future: F) -> Result<T, PluginError>
-where
-    F: Future<Output = Result<T, PluginError>> + Send + 'static,
-    T: Send + 'static,
-{
-    TOKIO_RUNTIME.spawn(future).await?
+db::gpui_tokio::init(cx);  // 创建全局 GlobalTokio 状态
+```
+
+**核心 API**:
+```rust
+impl Tokio {
+    // 在 GPUI 上下文中执行 Tokio future
+    pub fn spawn<C, Fut, R>(cx: &C, f: Fut) -> Task<Result<R, JoinError>>
+    where
+        C: Context,
+        Fut: Future<Output = R> + Send + 'static,
+        R: Send + 'static;
+
+    // 带错误处理的版本
+    pub fn spawn_result<C, Fut, R>(cx: &C, f: Fut) -> Task<anyhow::Result<R>>
+    where
+        C: Context,
+        Fut: Future<Output = anyhow::Result<R>> + Send + 'static,
+        R: Send + 'static;
+
+    // 获取 Tokio runtime handle
+    pub fn handle(cx: &App) -> tokio::runtime::Handle;
 }
 ```
 
-**用途**: 在 GPUI 的同步/异步上下文中执行 SQLx 异步操作 (SQLx 依赖 Tokio)
+**使用示例**:
+```rust
+// 在 GPUI 组件中调用 SQLx 异步操作
+cx.spawn(|this, mut cx| async move {
+    let result = Tokio::spawn_result(&cx, async {
+        // SQLx 异步数据库操作
+        connection.query("SELECT * FROM users").await
+    }).await?;
+
+    // 更新 UI
+    this.update(&mut cx, |this, cx| {
+        this.data = result;
+        cx.notify();
+    })
+})
+```
+
+**优势**:
+- 集成 GPUI 的 Context 系统
+- 返回 GPUI Task 而非 Tokio JoinHandle
+- 统一错误处理 (anyhow::Result)
 
 #### mysql/plugin.rs - MySQL 插件实现
 
@@ -880,7 +1130,73 @@ pub struct PostgresDbConnection {
 
 ---
 
-### 11. 静态资源 (`crates/assets/`)
+### 14. UI 组件库 (`crates/ui/`) - 嵌入的 gpui-component 源码
+
+**重大变化**: 项目现已将完整的 gpui-component 组件库源码嵌入到 crates/ui 目录
+
+**规模**: ~60,000 行代码，64+ 模块文件
+
+**核心子系统**:
+
+#### DockArea 停靠面板系统
+- **文件**: dock.rs, panel.rs, stack_panel.rs, tab_panel.rs, tiles.rs, state.rs
+- **功能**:
+  - 可调整大小的面板布局
+  - 4 个停靠边缘 (left, right, top, bottom)
+  - 面板折叠/展开
+  - 布局状态序列化/反序列化
+  - TabPanel 和 StackPanel 两种面板类型
+- **用途**: DatabaseTabContent 和 DbWorkspace 使用 DockArea 构建工作区
+
+#### 高级输入组件 (20+ 文件)
+- **文件**: input/input.rs, input/element.rs, input/state.rs, 等
+- **功能**:
+  - 基于 ropey 的文本缓冲区
+  - LSP 集成 (代码补全、悬停提示、诊断、代码操作)
+  - Tree-sitter 语法高亮
+  - 多光标支持
+  - 搜索/替换
+  - 数字输入、OTP 输入、掩码输入
+- **用途**: SQL 编辑器基于此构建
+
+#### Highlighter 语法高亮系统
+- **文件**: highlighter/highlighter.rs, highlighter/languages.rs, highlighter/registry.rs
+- **功能**:
+  - 支持 20+ 编程语言 (Rust, JavaScript, Python, SQL, JSON, YAML, 等)
+  - Tree-sitter 解析器集成
+  - 主题色彩映射
+  - 诊断信息显示
+- **语言支持**: sql, rust, javascript, typescript, python, go, java, c, cpp, html, css, json, yaml, markdown, toml, xml, bash, php, ruby, swift
+
+#### 表格、列表、树形组件
+- **Table**: 数据表格，列调整、排序、选择、虚拟滚动
+- **List**: 高性能虚拟列表，缓存渲染
+- **Tree**: 树形组件，懒加载、展开/折叠
+
+#### 主题系统
+- **文件**: theme/theme.rs, theme/color_registry.rs, theme/json_themes.rs
+- **功能**:
+  - JSON 主题文件支持
+  - 颜色注册表
+  - 语法高亮主题
+  - 亮色/暗色模式切换
+
+#### 其他组件
+- **表单组件**: input, checkbox, radio, select, dropdown, date_picker, color_picker
+- **布局组件**: accordion, tabs, breadcrumb, divider
+- **反馈组件**: alert, badge, dialog, notification, popover, tooltip
+- **图表组件**: line_chart, bar_chart, area_chart, pie_chart
+- **WebView**: 嵌入网页视图
+
+**为何嵌入源码**:
+1. **完全控制**: 可自由修改和扩展组件
+2. **调试便利**: IDE 可直接跳转到组件源码
+3. **快速迭代**: 无需等待上游库更新
+4. **定制需求**: 数据库工具需要特定的 UI 定制
+
+---
+
+### 15. 静态资源 (`crates/assets/`)
 
 **内容**: SVG 图标和其他静态资源
 
@@ -897,15 +1213,24 @@ pub struct Assets;
 ```
 crates/assets/assets/
   └── icons/
-      ├── mysql.svg
-      ├── postgresql.svg
-      ├── sqlite.svg
-      ├── redis.svg
-      ├── mongodb.svg
+      ├── column.svg           # 列图标（新）
+      ├── database.svg         # 数据库图标（新）
+      ├── database1.svg        # 备选数据库图标（新）
+      ├── function.svg         # 函数图标（新）
+      ├── key.svg              # 主键图标（新）
+      ├── table.svg            # 表图标（新）
+      ├── table-view.svg       # 表视图图标（新）
+      ├── mysql.svg            # MySQL 图标
+      ├── postgresql.svg       # PostgreSQL 图标
+      ├── sqlite.svg           # SQLite 图标
+      ├── redis.svg            # Redis 图标
+      ├── mongodb.svg          # MongoDB 图标
       └── ... (其他图标)
 ```
 
 **使用**: 通过 `Assets::get("icons/mysql.svg")` 获取嵌入的资源
+
+**编译时嵌入**: 使用 rust-embed 在编译时将所有资源嵌入到二进制文件中
 
 ---
 
@@ -926,22 +1251,39 @@ crates/assets/assets/
 
 **问题**: GPUI 使用 smol 执行器，SQLx 需要 Tokio 运行时
 
-**解决方案**:
-- 全局 `TOKIO_RUNTIME` 实例
-- `spawn_result()` 辅助函数在 GPUI 上下文中执行 Tokio future
-- `ConnectionStore` 使用桥接函数调用异步存储操作
+**新架构解决方案** (gpui_tokio.rs):
+- `GlobalTokio` 全局状态持有 Tokio 运行时实例
+- `Tokio::spawn()` 和 `Tokio::spawn_result()` API 集成 GPUI Context
+- 返回 GPUI Task 而非 Tokio JoinHandle
+- 统一错误处理 (anyhow::Result)
 
-**示例**:
+**初始化**:
 ```rust
+// main.rs
+db::gpui_tokio::init(cx);  // 创建全局 GlobalTokio
+```
+
+**使用示例**:
+```rust
+// 在 GPUI 组件中
 cx.spawn(|this, mut cx| async move {
-    let result = spawn_result(async {
+    let result = Tokio::spawn_result(&cx, async {
         // SQLx 异步操作
         storage.load_connections().await
-    }).await;
+    }).await?;
+
     // 更新 UI
-    cx.update(|cx| { /* ... */ })
+    this.update(&mut cx, |this, cx| {
+        this.data = result;
+        cx.notify();
+    })
 })
 ```
+
+**优势**:
+- 无需手动获取 runtime handle
+- 自动错误传播
+- 与 GPUI 生命周期管理集成
 
 ### 3. 懒加载树 (Lazy-Loading Tree)
 
@@ -959,13 +1301,19 @@ cx.spawn(|this, mut cx| async move {
 - 不同内容类型实现相同接口
 - `TabContentType` 枚举类型标识
 - `TabContainer` 统一管理
+- 支持颜色自定义
 
-**内容类型**:
-- SQL 编辑器
-- 表数据查看
-- 表结构查看
-- 查询结果
-- 自定义内容
+**顶层标签页类型** (OneHupApp):
+- Home: 首页连接卡片
+- Database: 数据库工作区
+- Settings: 设置页面
+
+**数据库内标签页类型** (DatabaseTabContent):
+- SqlEditor: SQL 编辑器
+- TableData: 表数据查看
+- TableForm: 表结构查看
+- QueryResult: 查询结果
+- Custom: 自定义内容
 
 ### 5. 多连接管理 (Multi-Connection Management)
 
@@ -1100,8 +1448,11 @@ cx.spawn(|this, mut cx| async move {
 ### 3. 分层节点 ID
 格式 `<connection_id>:<database>:<folder_type>:<object_name>` 实现高效的树导航和上下文追踪。
 
-### 4. 全局 Tokio 运行时
-单一全局运行时实例桥接 GPUI (smol) 和 SQLx (Tokio) 的异步生态系统。
+### 4. 新架构：GPUI/Tokio 桥接（gpui_tokio.rs）
+- 使用 `GlobalTokio` 全局状态管理 Tokio 运行时
+- `Tokio::spawn_result()` API 集成 GPUI Context 系统
+- 返回 GPUI Task 实现无缝集成
+- 相比旧的 `runtime.rs` 更优雅和类型安全
 
 ### 5. Arc 包装连接
 连接使用 `Arc<RwLock<Box<dyn DbConnection>>>` 包装，实现高效克隆和线程安全共享。
@@ -1113,7 +1464,29 @@ cx.spawn(|this, mut cx| async move {
 `TabContent` trait 允许无缝添加新的标签类型，无需修改容器代码。
 
 ### 8. 多格式导入导出
-统一的导入导出接口支持 CSV, JSON, SQL, Markdown, Excel, Word 等多种格式。
+统一的导入导出接口支持 CSV, JSON, SQL, Markdown, Excel, Word 等多种格式（已实现但未启用）。
+
+### 9. 两级标签页系统
+**顶层标签页** (应用级导航): Home, Database, Settings
+**数据库内标签页** (工作区内容): SQL 编辑器、表数据、表结构等
+
+这种设计使得用户可以同时打开多个数据库连接，每个连接有自己的工作区。
+
+### 10. DockArea 集成
+使用 gpui-component 的 DockArea 系统构建灵活的面板布局：
+- 左侧树形导航面板（可折叠）
+- 中心 TabPanel（多标签页）
+- 布局状态可持久化
+
+### 11. 事件驱动架构
+DatabaseEventHandler 订阅树形视图事件，自动创建对应标签页，实现解耦的组件通信。
+
+### 12. UI 组件库嵌入
+将 gpui-component 完整源码嵌入到项目中 (crates/ui)：
+- 完全控制组件行为
+- 无需等待上游更新
+- IDE 可直接跳转到源码
+- 约 60,000 行代码提供丰富的 UI 能力
 
 ---
 
@@ -1263,10 +1636,21 @@ cargo check                    # 快速语法检查
 
 | 模块            | 文件数 | 代码行数 (估算) |
 |---------------|-----|-----------|
-| src/          | 16  | ~4500     |
-| crates/db/    | 11  | ~3500     |
+| src/          | 21  | ~8,200    |
+| crates/db/    | 13  | ~3,500    |
+| crates/ui/    | 64+ | ~60,000   |
+| crates/macros | 3   | ~500      |
 | crates/assets | 1   | ~10       |
-| **总计**        | 28  | **~8000** |
+| **总计**        | 102+ | **~72,000** |
+
+**主要文件大小**:
+- sql_editor_view.rs: 1,339 行
+- tab_contents.rs: 911 行
+- db_tree_view.rs: 873 行
+- db_workspace.rs: 685 行 (实验性)
+- tab_container.rs: 544 行
+- onehup_app.rs: 448 行
+- database_tab.rs: 432 行
 
 ---
 
@@ -1325,4 +1709,4 @@ cargo check                    # 快速语法检查
 
 ---
 
-**最后更新**: 2025-01-19 (基于实际代码结构完整重写)
+**最后更新**: 2025-01-20 (基于最新代码结构完整重写，包含 UI 组件库嵌入、两级标签页系统、DockArea 集成等重大更新)
