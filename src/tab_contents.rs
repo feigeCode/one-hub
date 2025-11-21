@@ -1,6 +1,7 @@
 use gpui::{
     div, AnyElement, App, AppContext as _, ClickEvent, Entity, IntoElement,
-    ParentElement, SharedString, Styled, Window,
+    ParentElement, SharedString, Styled, Window, Focusable, FocusHandle, EventEmitter,
+    Render, Context, WeakEntity,
 };
 use gpui_component::{
     button::{Button, ButtonVariants as _},
@@ -8,6 +9,8 @@ use gpui_component::{
     input::{Input, InputState},
     table::{Column, Table, TableDelegate},
     v_flex, ActiveTheme as _, IconName, Sizable as _, Size, StyledExt as _,
+    dock::{Panel, PanelControl, PanelEvent, PanelState, TabPanel, TitleStyle},
+    menu::PopupMenu,
 };
 use std::any::Any;
 use std::sync::Arc;
@@ -32,6 +35,7 @@ pub struct TableDataTabContent {
     delegate: Arc<std::sync::RwLock<ResultsDelegate>>,
     table: Entity<TableState<DelegateWrapper>>,
     status_msg: Entity<String>,
+    focus_handle: FocusHandle,
 }
 
 impl TableDataTabContent {
@@ -51,12 +55,14 @@ impl TableDataTabContent {
         };
         let table = cx.new(|cx| TableState::new(delegate_wrapper, window, cx));
         let status_msg = cx.new(|_| "Loading...".to_string());
+        let focus_handle = cx.focus_handle();
 
         let result = Self {
             table_name: table_name.clone(),
             delegate: delegate.clone(),
             table: table.clone(),
             status_msg: status_msg.clone(),
+            focus_handle,
         };
 
         // Load data initially
@@ -235,7 +241,95 @@ impl Clone for TableDataTabContent {
             delegate: self.delegate.clone(),
             table: self.table.clone(),
             status_msg: self.status_msg.clone(),
+            focus_handle: self.focus_handle.clone(),
         }
+    }
+}
+
+impl EventEmitter<PanelEvent> for TableDataTabContent {}
+
+impl Render for TableDataTabContent {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .size_full()
+            .child(self.render_content(window, cx))
+    }
+}
+
+impl Focusable for TableDataTabContent {
+    fn focus_handle(&self, _cx: &App) -> FocusHandle {
+        self.focus_handle.clone()
+    }
+}
+
+impl Panel for TableDataTabContent {
+    fn panel_name(&self) -> &'static str {
+        "TableData"
+    }
+
+    fn tab_name(&self, _cx: &App) -> Option<SharedString> {
+        Some(TabContent::title(self))
+    }
+
+    fn title(&self, _window: &Window, _cx: &App) -> AnyElement {
+        h_flex()
+            .items_center()
+            .gap_2()
+            .child(IconName::Folder)
+            .child(TabContent::title(self))
+            .into_any_element()
+    }
+
+    fn title_style(&self, _cx: &App) -> Option<TitleStyle> {
+        None
+    }
+
+    fn title_suffix(&self, _window: &mut Window, _cx: &mut App) -> Option<AnyElement> {
+        None
+    }
+
+    fn closable(&self, _cx: &App) -> bool {
+        true
+    }
+
+    fn zoomable(&self, _cx: &App) -> Option<PanelControl> {
+        None
+    }
+
+    fn visible(&self, _cx: &App) -> bool {
+        true
+    }
+
+    fn set_active(&mut self, _active: bool, _window: &mut Window, _cx: &mut App) {
+        // No special handling needed
+    }
+
+    fn set_zoomed(&mut self, _zoomed: bool, _window: &mut Window, _cx: &mut App) {
+        // No special handling needed
+    }
+
+    fn on_added_to(&mut self, _tab_panel: WeakEntity<TabPanel>, _window: &mut Window, _cx: &mut App) {
+        // No special handling needed
+    }
+
+    fn on_removed(&mut self, _window: &mut Window, _cx: &mut App) {
+        // No special handling needed
+    }
+
+    fn dropdown_menu(&self, this: PopupMenu, _window: &Window, _cx: &App) -> PopupMenu {
+        this
+    }
+
+    fn toolbar_buttons(&self, _window: &mut Window, _cx: &mut App) -> Option<Vec<Button>> {
+        None
+    }
+
+    fn dump(&self, _cx: &App) -> PanelState {
+        PanelState::new(self)
+    }
+
+    fn inner_padding(&self, _cx: &App) -> bool {
+        false
     }
 }
 
@@ -261,6 +355,7 @@ pub struct TableStructureTabContent {
     status_msg: Entity<String>,
     columns_loaded: Arc<std::sync::RwLock<bool>>,
     loaded_columns: Arc<std::sync::RwLock<Vec<ColumnInfo>>>,
+    focus_handle: FocusHandle,
 }
 
 impl TableStructureTabContent {
@@ -277,6 +372,7 @@ impl TableStructureTabContent {
         let next_id = Arc::new(std::sync::RwLock::new(0));
         let columns_loaded = Arc::new(std::sync::RwLock::new(false));
         let loaded_columns = Arc::new(std::sync::RwLock::new(Vec::new()));
+        let focus_handle = cx.focus_handle();
 
         let result = Self {
             database_name: database_name.clone(),
@@ -286,6 +382,7 @@ impl TableStructureTabContent {
             status_msg: status_msg.clone(),
             columns_loaded: columns_loaded.clone(),
             loaded_columns: loaded_columns.clone(),
+            focus_handle,
         };
 
         // Start loading structure in background
@@ -839,7 +936,95 @@ impl Clone for TableStructureTabContent {
             status_msg: self.status_msg.clone(),
             columns_loaded: self.columns_loaded.clone(),
             loaded_columns: self.loaded_columns.clone(),
+            focus_handle: self.focus_handle.clone(),
         }
+    }
+}
+
+impl EventEmitter<PanelEvent> for TableStructureTabContent {}
+
+impl Render for TableStructureTabContent {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .size_full()
+            .child(self.render_content(window, cx))
+    }
+}
+
+impl Focusable for TableStructureTabContent {
+    fn focus_handle(&self, _cx: &App) -> FocusHandle {
+        self.focus_handle.clone()
+    }
+}
+
+impl Panel for TableStructureTabContent {
+    fn panel_name(&self) -> &'static str {
+        "TableStructure"
+    }
+
+    fn tab_name(&self, _cx: &App) -> Option<SharedString> {
+        Some(TabContent::title(self))
+    }
+
+    fn title(&self, _window: &Window, _cx: &App) -> AnyElement {
+        h_flex()
+            .items_center()
+            .gap_2()
+            .child(IconName::Settings)
+            .child(TabContent::title(self))
+            .into_any_element()
+    }
+
+    fn title_style(&self, _cx: &App) -> Option<TitleStyle> {
+        None
+    }
+
+    fn title_suffix(&self, _window: &mut Window, _cx: &mut App) -> Option<AnyElement> {
+        None
+    }
+
+    fn closable(&self, _cx: &App) -> bool {
+        true
+    }
+
+    fn zoomable(&self, _cx: &App) -> Option<PanelControl> {
+        None
+    }
+
+    fn visible(&self, _cx: &App) -> bool {
+        true
+    }
+
+    fn set_active(&mut self, _active: bool, _window: &mut Window, _cx: &mut App) {
+        // No special handling needed
+    }
+
+    fn set_zoomed(&mut self, _zoomed: bool, _window: &mut Window, _cx: &mut App) {
+        // No special handling needed
+    }
+
+    fn on_added_to(&mut self, _tab_panel: WeakEntity<TabPanel>, _window: &mut Window, _cx: &mut App) {
+        // No special handling needed
+    }
+
+    fn on_removed(&mut self, _window: &mut Window, _cx: &mut App) {
+        // No special handling needed
+    }
+
+    fn dropdown_menu(&self, this: PopupMenu, _window: &Window, _cx: &App) -> PopupMenu {
+        this
+    }
+
+    fn toolbar_buttons(&self, _window: &mut Window, _cx: &mut App) -> Option<Vec<Button>> {
+        None
+    }
+
+    fn dump(&self, _cx: &App) -> PanelState {
+        PanelState::new(self)
+    }
+
+    fn inner_padding(&self, _cx: &App) -> bool {
+        false
     }
 }
 

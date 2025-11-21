@@ -146,6 +146,20 @@ impl DbTreeView {
         }
     }
 
+    /// 展开指定的数据库节点
+    pub fn expand_database(&mut self, connection_id: &str, database: &str, cx: &mut Context<Self>) {
+        // 构建数据库节点 ID
+        let db_node_id = format!("{}_db_{}", connection_id, database);
+        
+        // 标记为已展开
+        self.expanded_nodes.insert(db_node_id.clone());
+        
+        // 如果子节点未加载，触发加载
+        if !self.loaded_children.contains(&db_node_id) {
+            self.lazy_load_children(db_node_id, cx);
+        }
+    }
+
     /// 创建初始树结构（未连接状态）
     fn create_initial_tree(init_nodes: Vec<DbNode>) -> Vec<TreeItem> {
         if init_nodes.is_empty() {

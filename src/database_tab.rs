@@ -6,7 +6,7 @@ use gpui::{
 };
 use gpui::prelude::FluentBuilder;
 use gpui_component::{h_flex, v_flex, ActiveTheme, IconName};
-use gpui_component::dock::{DockArea, DockAreaState, DockEvent, DockItem, PanelView};
+use gpui_component::dock::{DockArea, DockAreaState, DockItem, PanelView};
 use crate::onehup_app::ConnectionInfo;
 use crate::tab_container::{TabContent, TabContentType};
 
@@ -15,7 +15,6 @@ const DATABASE_TAB_DOCK_VERSION: usize = 1;
 
 // Event handler for database tree view events
 struct DatabaseEventHandler {
-    dock_area: WeakEntity<DockArea>,
     _tree_subscription: Subscription,
 }
 
@@ -42,8 +41,6 @@ impl DatabaseEventHandler {
                             window,
                             cx,
                         );
-                        // Load databases during creation
-                        editor.load_databases(window, cx);
                         editor
                     });
 
@@ -56,16 +53,65 @@ impl DatabaseEventHandler {
                     }
                 }
                 DbTreeViewEvent::OpenTableData { database, table } => {
-                    // TODO: Implement TableDataTabContent as Panel
-                    eprintln!("OpenTableData event: {}.{}", database, table);
+                    use crate::tab_contents::TableDataTabContent;
+
+                    // Create table data panel
+                    let table_data = cx.new(|cx| {
+                        TableDataTabContent::new(
+                            format!("{}.{}", database, table),
+                            window,
+                            cx,
+                        )
+                    });
+
+                    // Add to center area of DockArea
+                    if let Ok(_) = dock_area_clone.update(cx, |dock_area, cx| {
+                        let panel: Arc<dyn PanelView> = Arc::new(table_data.clone());
+                        dock_area.add_panel(panel, gpui_component::dock::DockPlacement::Center, None, window, cx);
+                    }) {
+                        // Successfully added
+                    }
                 }
                 DbTreeViewEvent::OpenViewData { database, view } => {
-                    // TODO: Implement TableDataTabContent as Panel for views
-                    eprintln!("OpenViewData event: {}.{}", database, view);
+                    use crate::tab_contents::TableDataTabContent;
+
+                    // Create view data panel (reuse TableDataTabContent)
+                    let view_data = cx.new(|cx| {
+                        TableDataTabContent::new(
+                            format!("{}.{}", database, view),
+                            window,
+                            cx,
+                        )
+                    });
+
+                    // Add to center area of DockArea
+                    if let Ok(_) = dock_area_clone.update(cx, |dock_area, cx| {
+                        let panel: Arc<dyn PanelView> = Arc::new(view_data.clone());
+                        dock_area.add_panel(panel, gpui_component::dock::DockPlacement::Center, None, window, cx);
+                    }) {
+                        // Successfully added
+                    }
                 }
                 DbTreeViewEvent::OpenTableStructure { database, table } => {
-                    // TODO: Implement TableStructureTabContent as Panel
-                    eprintln!("OpenTableStructure event: {}.{}", database, table);
+                    use crate::tab_contents::TableStructureTabContent;
+
+                    // Create table structure panel
+                    let table_structure = cx.new(|cx| {
+                        TableStructureTabContent::new(
+                            database.clone(),
+                            table.clone(),
+                            window,
+                            cx,
+                        )
+                    });
+
+                    // Add to center area of DockArea
+                    if let Ok(_) = dock_area_clone.update(cx, |dock_area, cx| {
+                        let panel: Arc<dyn PanelView> = Arc::new(table_structure.clone());
+                        dock_area.add_panel(panel, gpui_component::dock::DockPlacement::Center, None, window, cx);
+                    }) {
+                        // Successfully added
+                    }
                 }
                 DbTreeViewEvent::ConnectToConnection { .. } => {
                     // Already connected, ignore
@@ -74,7 +120,6 @@ impl DatabaseEventHandler {
         });
 
         Self {
-            dock_area,
             _tree_subscription: tree_subscription,
         }
     }
@@ -87,6 +132,7 @@ pub struct DatabaseTabContent {
     last_layout_state: Option<DockAreaState>,
     _save_layout_task: Option<Task<()>>,
     db_tree_view: Entity<crate::db_tree_view::DbTreeView>,
+    objects_panel: Entity<crate::database_objects_panel::DatabaseObjectsPanel>,
     status_msg: Entity<String>,
     is_connected: Entity<bool>,
     event_handler: Option<Entity<DatabaseEventHandler>>,
@@ -121,17 +167,12 @@ impl DatabaseTabContent {
             DockArea::new(dock_id, Some(DATABASE_TAB_DOCK_VERSION), window, cx)
         });
 
-        // Create a default SQL Editor tab for the center area
-        let sql_editor = cx.new(|cx| {
-            crate::sql_editor_view::SqlEditorTabContent::new_with_database(
-                format!("{} - Query", connection_info.name),
-                connection_info.database.clone(),
-                window,
-                cx,
-            )
+        // Create objects panel as first tab in center
+        let objects_panel = cx.new(|cx| {
+            crate::database_objects_panel::DatabaseObjectsPanel::new(window, cx)
         });
 
-        // Setup the dock layout - tree view on left, sql editor in center
+        // Setup the dock layout - tree view on left, objects panel + sql editor in center
         let weak_dock_area = dock_area.downgrade();
         dock_area.update(cx, |dock_area, cx| {
             // Add tree view to left dock
@@ -139,9 +180,16 @@ impl DatabaseTabContent {
             let left_dock_item = DockItem::tabs(vec![panel_view], Some(0), &weak_dock_area, window, cx);
             dock_area.set_left_dock(left_dock_item, Some(px(280.0)), true, window, cx);
 
-            // Add SQL editor to center area
-            let center_panel: Arc<dyn PanelView> = Arc::new(sql_editor.clone());
-            let center_dock_item = DockItem::tabs(vec![center_panel], Some(0), &weak_dock_area, window, cx);
+            // Add objects panel and SQL editor to center area (objects panel first)
+            let objects_panel_view: Arc<dyn PanelView> = Arc::new(objects_panel.clone());
+            // let sql_editor_panel: Arc<dyn PanelView> = Arc::new(sql_editor.clone());
+            let center_dock_item = DockItem::tabs(
+                vec![objects_panel_view], 
+                Some(0), // Objects panel is active by default
+                &weak_dock_area, 
+                window, 
+                cx
+            );
             dock_area.set_center(center_dock_item, window, cx);
 
             // Set collapsible edges
@@ -171,6 +219,7 @@ impl DatabaseTabContent {
             last_layout_state: None,
             _save_layout_task: None,
             db_tree_view,
+            objects_panel,
             status_msg,
             is_connected,
             event_handler: Some(event_handler),
@@ -186,6 +235,7 @@ impl DatabaseTabContent {
         let status_msg = self.status_msg.clone();
         let is_connected = self.is_connected.clone();
         let db_tree_view = self.db_tree_view.clone();
+        let objects_panel = self.objects_panel.clone();
 
         let global_state = cx.global::<db::GlobalDbState>().clone();
         let stored_conn_id = conn.id.unwrap_or(0).to_string();
@@ -235,6 +285,16 @@ impl DatabaseTabContent {
                             .await;
                     }
 
+                    // Load databases and expand first one
+                    let conn_arc = global_state.connection_pool.get_current_connection().await;
+                    let first_database = if let Some(conn_arc) = conn_arc {
+                        let conn = conn_arc.read().await;
+                        plugin.list_databases(&**conn).await.ok()
+                            .and_then(|dbs| dbs.first().cloned())
+                    } else {
+                        None
+                    };
+
                     cx.update(|cx| {
                         is_connected.update(cx, |flag, cx| {
                             *flag = true;
@@ -249,7 +309,19 @@ impl DatabaseTabContent {
                         db_tree_view.update(cx, |tree, cx| {
                             tree.set_connection_name(config.name.clone());
                             tree.update_connection_node(&stored_conn_id, cx);
+                            
+                            // Auto-expand first database if available
+                            if let Some(ref db) = first_database {
+                                tree.expand_database(&stored_conn_id, db, cx);
+                            }
                         });
+
+                        // Load objects for first database
+                        if let Some(db) = first_database {
+                            objects_panel.update(cx, |panel, cx| {
+                                panel.set_database(db, cx);
+                            });
+                        }
                     })
                         .ok();
                 }
@@ -424,6 +496,7 @@ impl Clone for DatabaseTabContent {
             last_layout_state: self.last_layout_state.clone(),
             _save_layout_task: None, // Don't clone tasks
             db_tree_view: self.db_tree_view.clone(),
+            objects_panel: self.objects_panel.clone(),
             status_msg: self.status_msg.clone(),
             is_connected: self.is_connected.clone(),
             event_handler: self.event_handler.clone(),

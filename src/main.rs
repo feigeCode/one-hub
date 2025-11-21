@@ -9,13 +9,13 @@ mod tab_contents;
 mod context_menu_tree;
 mod storage;
 mod connection_store;
+mod database_objects_panel;
 
 mod themes;
 mod onehup_app;
 mod home;
 mod database_tab;
 mod setting_tab;
-mod db_workspace;
 
 use gpui::*;
 use gpui_component::Root;

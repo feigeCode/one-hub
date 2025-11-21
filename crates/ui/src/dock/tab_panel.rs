@@ -1,11 +1,6 @@
 use std::sync::Arc;
 
-use gpui::{
-    div, prelude::FluentBuilder, px, relative, rems, App, AppContext, Context, Corner,
-    DismissEvent, Div, DragMoveEvent, Empty, Entity, EventEmitter, FocusHandle, Focusable,
-    InteractiveElement as _, IntoElement, ParentElement, Pixels, Render, ScrollHandle,
-    SharedString, StatefulInteractiveElement, StyleRefinement, Styled, WeakEntity, Window,
-};
+use gpui::{div, prelude::FluentBuilder, px, relative, rems, App, AppContext, Context, Corner, DismissEvent, Div, DragMoveEvent, Empty, Entity, EventEmitter, FocusHandle, Focusable, InteractiveElement as _, IntoElement, MouseButton, ParentElement, Pixels, Render, ScrollHandle, SharedString, StatefulInteractiveElement, StyleRefinement, Styled, WeakEntity, Window};
 use rust_i18n::t;
 
 use crate::{
@@ -333,10 +328,27 @@ impl TabPanel {
     ) {
         panel.on_removed(window, cx);
         let panel_view = panel.view();
+        // 修改：页签新增关闭按钮
+        // ======================================开始=====================================
+        let removed_ix = self.panels.iter().position(|p| p.view() == panel_view);
+
         self.panels.retain(|p| p.view() != panel_view);
-        if self.active_ix >= self.panels.len() {
-            self.set_active_ix(self.panels.len().saturating_sub(1), window, cx)
-        }
+         if self.panels.is_empty() {
+            return;
+           }
+
+         // Update active index based on which panel was removed
+         if let Some(removed_ix) = removed_ix {
+              if removed_ix == self.active_ix {
+                // If removing the active panel, activate the previous one (or first if it was the first)
+                let new_ix = removed_ix.saturating_sub(1).min(self.panels.len() - 1);
+                 self.set_active_ix(new_ix, window, cx);
+             } else if removed_ix < self.active_ix {
+                 // If removed panel was before active, shift active index down
+                  self.set_active_ix(self.active_ix.saturating_sub(1), window, cx);
+              }
+          }
+         // ======================================结束=====================================
     }
 
     /// Check to remove self from the parent StackPanel, if there is no panel left
@@ -713,7 +725,7 @@ impl TabPanel {
                 if self.collapsed {
                     active = false;
                 }
-
+                let closable = panel.closable(cx);
                 Some(
                     Tab::default()
                         .map(|this| {
@@ -762,7 +774,38 @@ impl TabPanel {
                                     },
                                 ))
                             })
-                        }),
+                        }).when(closable, |element| {
+                        // 修改：页签新增关闭按钮
+                        // ======================================开始=====================================
+                            element.child(
+                                // 关闭按钮
+                                h_flex()
+                                    .ml_2()
+                                    .w(px(16.0))
+                                    .h(px(16.0))
+                                    .justify_center()
+                                    .rounded(px(2.0))
+                                    .cursor_pointer()
+                                    .text_color(gpui::rgb(0xaaaaaa))
+                                    .hover(|style| {
+                                        style
+                                            .bg(gpui::rgb(0x5a5a5a))
+                                            .text_color(gpui::white())
+                                    })
+                                    .on_mouse_down(MouseButton::Left, {
+                                        let dock_area = self.dock_area.clone();
+                                        let panel = panel.clone();
+                                        move |_event, window, cx1| {
+                                            let panel = panel.clone();
+                                            _ = dock_area.update(cx1, |this, cx2| {
+                                                this.remove_panel(panel, DockPlacement::Center, window, cx2);
+                                            });
+                                        }
+                                    })
+                                    .child("×")
+                                // ================================结束=====================================
+                        )
+                    }),
                 )
             }))
             .last_empty_space(
