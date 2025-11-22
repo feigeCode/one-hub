@@ -581,7 +581,6 @@ impl SqlEditor {
                 .soft_wrap(false)
                 .placeholder("Enter your SQL query here...");
 
-
             // Defaults: completion + hover + actions
             let default_schema = SqlSchema::default()
                 .with_tables([

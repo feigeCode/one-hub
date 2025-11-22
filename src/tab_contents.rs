@@ -66,93 +66,18 @@ impl TableDataTabContent {
         };
 
         // Load data initially
-        result.load_data(cx);
+        // TODO: Need connection config to load data
+        // result.load_data(cx);
+        status_msg.update(cx, |s, _cx| {
+            *s = "Table data loading not yet implemented with new connection pool".to_string();
+        });
 
         result
     }
 
-    fn load_data(&self, cx: &mut App) {
-        let sql = format!("SELECT * FROM {} LIMIT 1000", self.table_name);
-        let delegate = self.delegate.clone();
-        let table = self.table.clone();
-        let status_msg = self.status_msg.clone();
-        let global_state = cx.global::<GlobalDbState>().clone();
-
-        cx.spawn(async move |cx| {
-            // Get current connection
-            let conn_arc = match global_state.connection_pool.get_current_connection().await {
-                Some(c) => c,
-                None => {
-                    cx.update(|cx| {
-                        status_msg.update(cx, |s, cx| {
-                            *s = "No active connection".to_string();
-                            cx.notify();
-                        });
-                    }).ok();
-                    return;
-                }
-            };
-
-            // Execute query on connection
-            use db::{ExecOptions, SqlResult};
-            let conn = conn_arc.read().await;
-            match conn.query(&sql, None, ExecOptions::default()).await {
-                Ok(SqlResult::Query(query_result)) => {
-                    cx.update(|cx| {
-                        status_msg.update(cx, |s, cx| {
-                            *s = format!("{} rows loaded", query_result.rows.len());
-                            cx.notify();
-                        });
-                        {
-                            let mut d = delegate.write().unwrap();
-                            d.columns = query_result
-                                .columns
-                                .iter()
-                                .map(|h| Column::new(h.clone(), h.clone()))
-                                .collect();
-                            d.rows = query_result.rows.iter()
-                                .map(|row| row.iter()
-                                    .map(|cell| cell.clone().unwrap_or_else(|| "NULL".to_string()))
-                                    .collect())
-                                .collect();
-                        }
-                        table.update(cx, |t, cx| {
-                            t.refresh(cx);
-                            cx.notify();
-                        });
-                    })
-                    .ok();
-                }
-                Ok(SqlResult::Error(err)) => {
-                    cx.update(|cx| {
-                        status_msg.update(cx, |s, cx| {
-                            *s = format!("Error: {}", err.message);
-                            cx.notify();
-                        });
-                    })
-                    .ok();
-                }
-                Ok(_) => {
-                    cx.update(|cx| {
-                        status_msg.update(cx, |s, cx| {
-                            *s = "Unexpected result type for SELECT query".to_string();
-                            cx.notify();
-                        });
-                    })
-                    .ok();
-                }
-                Err(e) => {
-                    cx.update(|cx| {
-                        status_msg.update(cx, |s, cx| {
-                            *s = format!("Error: {}", e);
-                            cx.notify();
-                        });
-                    })
-                    .ok();
-                }
-            }
-        })
-        .detach();
+    fn load_data(&self, _cx: &mut App) {
+        // TODO: Implement data loading with connection config
+        // This requires the connection config to be passed in
     }
 
     fn handle_refresh(&self, _: &ClickEvent, _: &mut Window, cx: &mut App) {
@@ -386,87 +311,17 @@ impl TableStructureTabContent {
         };
 
         // Start loading structure in background
-        result.load_structure(window, cx);
+        // TODO: Need connection config to load structure
+        // result.load_structure(window, cx);
+        status_msg.update(cx, |s, _cx| {
+            *s = "Table structure loading not yet implemented with new connection pool".to_string();
+        });
         result
     }
 
-    fn load_structure(&self, _window: &mut Window, cx: &mut App) {
-        let global_state = cx.global::<GlobalDbState>().clone();
-        let database = self.database_name.clone();
-        let table = self.table_name.clone();
-        let status_msg = self.status_msg.clone();
-        let columns_loaded = self.columns_loaded.clone();
-        let loaded_columns = self.loaded_columns.clone();
-
-        cx.spawn(async move |cx| {
-            // Get current connection and config
-            let conn_arc = match global_state.connection_pool.get_current_connection().await {
-                Some(c) => c,
-                None => {
-                    cx.update(|cx| {
-                        status_msg.update(cx, |s, cx| {
-                            *s = "No active connection".to_string();
-                            cx.notify();
-                        });
-                    }).ok();
-                    return;
-                }
-            };
-
-            let config = match global_state.connection_pool.get_current_connection_config().await {
-                Some(c) => c,
-                None => {
-                    cx.update(|cx| {
-                        status_msg.update(cx, |s, cx| {
-                            *s = "No connection config".to_string();
-                            cx.notify();
-                        });
-                    }).ok();
-                    return;
-                }
-            };
-
-            // Get plugin
-            let plugin = match global_state.db_manager.get_plugin(&config.database_type) {
-                Ok(p) => p,
-                Err(e) => {
-                    cx.update(|cx| {
-                        status_msg.update(cx, |s, cx| {
-                            *s = format!("Failed to get plugin: {}", e);
-                            cx.notify();
-                        });
-                    }).ok();
-                    return;
-                }
-            };
-
-            // Load columns
-            let conn = conn_arc.read().await;
-            match plugin.list_columns(&**conn, &database, &table).await {
-                Ok(columns) => {
-                    cx.update(|cx| {
-                        *columns_loaded.write().unwrap() = true;
-                        *loaded_columns.write().unwrap() = columns.clone();
-
-                        status_msg.update(cx, |s, cx| {
-                            *s = format!("Found {} columns - click 'Load Columns' to populate", columns.len());
-                            cx.notify();
-                        });
-                    })
-                    .ok();
-                }
-                Err(e) => {
-                    cx.update(|cx| {
-                        status_msg.update(cx, |s, cx| {
-                            *s = format!("Failed to load columns: {}", e);
-                            cx.notify();
-                        });
-                    })
-                    .ok();
-                }
-            }
-        })
-        .detach();
+    fn load_structure(&self, _window: &mut Window, _cx: &mut App) {
+        // TODO: Implement structure loading with connection config
+        // This requires the connection config to be passed in
     }
 
     fn populate_from_loaded_columns(&self, window: &mut Window, cx: &mut App) {
@@ -605,165 +460,16 @@ impl TableStructureTabContent {
         }
 
         let status_msg = self.status_msg.clone();
-        let global_state = cx.global::<GlobalDbState>().clone();
-        let database_name = self.database_name.clone();
-        let table_name = self.table_name.clone();
+        let _status_msg = self.status_msg.clone();
+        let _global_state = cx.global::<GlobalDbState>().clone();
+        let _database_name = self.database_name.clone();
+        let _table_name = self.table_name.clone();
 
-        cx.spawn(async move |cx| {
-            // Get current connection and config
-            let conn_arc = match global_state.connection_pool.get_current_connection().await {
-                Some(c) => c,
-                None => {
-                    cx.update(|cx| {
-                        status_msg.update(cx, |s, cx| {
-                            *s = "No active connection".to_string();
-                            cx.notify();
-                        });
-                    }).ok();
-                    return;
-                }
-            };
-
-            let config = match global_state.connection_pool.get_current_connection_config().await {
-                Some(c) => c,
-                None => {
-                    cx.update(|cx| {
-                        status_msg.update(cx, |s, cx| {
-                            *s = "No connection config".to_string();
-                            cx.notify();
-                        });
-                    }).ok();
-                    return;
-                }
-            };
-
-            // Get plugin
-            let plugin = match global_state.db_manager.get_plugin(&config.database_type) {
-                Ok(p) => p,
-                Err(e) => {
-                    cx.update(|cx| {
-                        status_msg.update(cx, |s, cx| {
-                            *s = format!("Failed to get plugin: {}", e);
-                            cx.notify();
-                        });
-                    }).ok();
-                    return;
-                }
-            };
-
-            // First, get current table structure
-            let conn = conn_arc.read().await;
-            let existing_columns = match plugin.list_columns(&**conn, &database_name, &table_name).await {
-                Ok(cols) => cols,
-                Err(e) => {
-                    cx.update(|cx| {
-                        status_msg.update(cx, |s, cx| {
-                            *s = format!("Error loading current structure: {}", e);
-                            cx.notify();
-                        });
-                    }).ok();
-                    return;
-                }
-            };
-
-            // Create a map of existing columns
-            let existing_map: std::collections::HashMap<String, ColumnInfo> = existing_columns
-                .iter()
-                .map(|col| (col.name.to_lowercase(), col.clone()))
-                .collect();
-
-            // Create a map of new columns
-            let new_map: std::collections::HashMap<String, (String, bool)> = fields
-                .iter()
-                .map(|(name, data_type, nullable)| {
-                    (name.to_lowercase(), (data_type.clone(), *nullable))
-                })
-                .collect();
-
-            // Generate ALTER TABLE statements
-            let mut alter_statements = Vec::new();
-
-            // Find columns to add
-            for (name, data_type, nullable) in &fields {
-                let name_lower = name.to_lowercase();
-                if !existing_map.contains_key(&name_lower) {
-                    let nullable_str = if *nullable { "NULL" } else { "NOT NULL" };
-                    alter_statements.push(format!(
-                        "ALTER TABLE `{}` ADD COLUMN `{}` {} {}",
-                        table_name, name, data_type, nullable_str
-                    ));
-                }
-            }
-
-            // Find columns to drop
-            for (existing_name, _) in &existing_map {
-                if !new_map.contains_key(existing_name) {
-                    alter_statements.push(format!(
-                        "ALTER TABLE `{}` DROP COLUMN `{}`",
-                        table_name, existing_name
-                    ));
-                }
-            }
-
-            // Find columns to modify
-            for (name, data_type, nullable) in &fields {
-                let name_lower = name.to_lowercase();
-                if let Some(existing_col) = existing_map.get(&name_lower) {
-                    // Check if type or nullable changed
-                    let type_changed = existing_col.data_type.to_lowercase() != data_type.to_lowercase();
-                    let nullable_changed = existing_col.is_nullable != *nullable;
-
-                    if type_changed || nullable_changed {
-                        let nullable_str = if *nullable { "NULL" } else { "NOT NULL" };
-                        alter_statements.push(format!(
-                            "ALTER TABLE `{}` MODIFY COLUMN `{}` {} {}",
-                            table_name, name, data_type, nullable_str
-                        ));
-                    }
-                }
-            }
-
-            // If no changes, show message
-            if alter_statements.is_empty() {
-                cx.update(|cx| {
-                    status_msg.update(cx, |s, cx| {
-                        *s = "No changes detected".to_string();
-                        cx.notify();
-                    });
-                }).ok();
-                return;
-            }
-
-            // Execute ALTER TABLE statements
-            let mut success_count = 0;
-            let mut error_messages = Vec::new();
-
-            for statement in &alter_statements {
-                use db::ExecOptions;
-                match conn.execute(statement, ExecOptions::default()).await {
-                    Ok(_) => success_count += 1,
-                    Err(e) => error_messages.push(format!("{}: {}", statement, e)),
-                }
-            }
-
-            // Update status
-            cx.update(|cx| {
-                status_msg.update(cx, |s, cx| {
-                    if error_messages.is_empty() {
-                        *s = format!("Successfully executed {} ALTER TABLE statement(s)", success_count);
-                    } else {
-                        *s = format!(
-                            "Completed with errors: {} succeeded, {} failed. Errors: {}",
-                            success_count,
-                            error_messages.len(),
-                            error_messages.join("; ")
-                        );
-                    }
-                    cx.notify();
-                });
-            }).ok();
-        })
-        .detach();
+        // TODO: Implement save with connection config
+        self.status_msg.update(cx, |s, cx| {
+            *s = "Save not yet implemented with new connection pool".to_string();
+            cx.notify();
+        });
     }
 }
 

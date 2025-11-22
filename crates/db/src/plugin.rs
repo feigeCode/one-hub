@@ -177,17 +177,6 @@ pub trait DatabasePlugin: Send + Sync {
     async fn load_node_children(&self, connection: &dyn DbConnection, node: &DbNode) -> Result<Vec<DbNode>> {
         let id = &node.id;
         match node.node_type {
-            DbNodeType::Connection => {
-                let databases = self.list_databases(connection).await?;
-                Ok(databases
-                    .into_iter()
-                    .map(|db| {
-                        DbNode::new(format!("{}:{}", &node.id, db), db.clone(), DbNodeType::Database)
-                            .with_children_flag(true)
-                            .with_parent_context(id)
-                    })
-                    .collect())
-            }
             DbNodeType::Database => {
                 self.build_database_tree(connection, node).await
             }

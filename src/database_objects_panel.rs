@@ -18,7 +18,7 @@ pub struct DatabaseObjectsPanel {
     views: Entity<Vec<String>>,
     functions: Entity<Vec<String>>,
     procedures: Entity<Vec<String>>,
-    active_tab: Entity<usize>, // 0=Tables, 1=Views, 2=Functions, 3=Procedures
+    pub active_tab: Entity<usize>, // 0=Tables, 1=Views, 2=Functions, 3=Procedures
     search_input: Entity<InputState>,
     focus_handle: FocusHandle,
     status_msg: Entity<String>,
@@ -52,7 +52,7 @@ impl DatabaseObjectsPanel {
     }
 
     /// Set the current database and load its objects
-    pub fn set_database(&self, database: String, cx: &mut App) {
+    pub fn set_database(&self, database: String, config: db::DbConnectionConfig, cx: &mut App) {
         self.current_database.update(cx, |db, cx| {
             *db = Some(database.clone());
             cx.notify();
@@ -63,10 +63,10 @@ impl DatabaseObjectsPanel {
             cx.notify();
         });
 
-        self.load_objects(database, cx);
+        self.load_objects(database, config, cx);
     }
 
-    fn load_objects(&self, database: String, cx: &mut App) {
+    fn load_objects(&self, database: String, config: db::DbConnectionConfig, cx: &mut App) {
         let global_state = cx.global::<db::GlobalDbState>().clone();
         let tables = self.tables.clone();
         let views = self.views.clone();
@@ -75,35 +75,6 @@ impl DatabaseObjectsPanel {
         let status_msg = self.status_msg.clone();
 
         cx.spawn(async move |cx| {
-            // Get current connection and config
-            let conn_arc = match global_state.connection_pool.get_current_connection().await {
-                Some(c) => c,
-                None => {
-                    cx.update(|cx| {
-                        status_msg.update(cx, |msg, cx| {
-                            *msg = "No active connection".to_string();
-                            cx.notify();
-                        });
-                    })
-                    .ok();
-                    return;
-                }
-            };
-
-            let config = match global_state.connection_pool.get_current_connection_config().await {
-                Some(c) => c,
-                None => {
-                    cx.update(|cx| {
-                        status_msg.update(cx, |msg, cx| {
-                            *msg = "No connection config".to_string();
-                            cx.notify();
-                        });
-                    })
-                    .ok();
-                    return;
-                }
-            };
-
             // Get plugin
             let plugin = match global_state.db_manager.get_plugin(&config.database_type) {
                 Ok(p) => p,
@@ -113,57 +84,79 @@ impl DatabaseObjectsPanel {
                             *msg = format!("Failed to get plugin: {}", e);
                             cx.notify();
                         });
-                    })
-                    .ok();
+                    }).ok();
                     return;
                 }
             };
 
-            // Load objects
+            // Get connection
+            let conn_arc = match global_state.connection_pool.get_connection(config, &global_state.db_manager).await {
+                Ok(c) => c,
+                Err(e) => {
+                    cx.update(|cx| {
+                        status_msg.update(cx, |msg, cx| {
+                            *msg = format!("Failed to get connection: {}", e);
+                            cx.notify();
+                        });
+                    }).ok();
+                    return;
+                }
+            };
+
             let conn = conn_arc.read().await;
 
-            let tables_result = plugin.list_tables(&**conn, &database).await;
-            let views_result = plugin.list_views(&**conn, &database).await;
-            let functions_result = plugin.list_functions(&**conn, &database).await;
-            let procedures_result = plugin.list_procedures(&**conn, &database).await;
+            // Load tables
+            let tables_list = plugin.list_tables(&**conn, &database).await.unwrap_or_default();
+            
+            // Load views
+            let views_list = plugin.list_views(&**conn, &database).await
+                .unwrap_or_default()
+                .into_iter()
+                .map(|v| v.name)
+                .collect::<Vec<_>>();
+            
+            // Load functions
+            let functions_list = plugin.list_functions(&**conn, &database).await
+                .unwrap_or_default()
+                .into_iter()
+                .map(|f| f.name)
+                .collect::<Vec<_>>();
+            
+            // Load procedures
+            let procedures_list = plugin.list_procedures(&**conn, &database).await
+                .unwrap_or_default()
+                .into_iter()
+                .map(|p| p.name)
+                .collect::<Vec<_>>();
 
+            // Update UI
             cx.update(|cx| {
-                if let Ok(table_list) = tables_result {
-                    tables.update(cx, |t, cx| {
-                        *t = table_list;
-                        cx.notify();
-                    });
-                }
+                tables.update(cx, |t, cx| {
+                    *t = tables_list;
+                    cx.notify();
+                });
 
-                if let Ok(view_list) = views_result {
-                    views.update(cx, |v, cx| {
-                        *v = view_list.into_iter().map(|vi| vi.name).collect();
-                        cx.notify();
-                    });
-                }
+                views.update(cx, |v, cx| {
+                    *v = views_list;
+                    cx.notify();
+                });
 
-                if let Ok(func_list) = functions_result {
-                    functions.update(cx, |f, cx| {
-                        *f = func_list.into_iter().map(|fi| fi.name).collect();
-                        cx.notify();
-                    });
-                }
+                functions.update(cx, |f, cx| {
+                    *f = functions_list;
+                    cx.notify();
+                });
 
-                if let Ok(proc_list) = procedures_result {
-                    procedures.update(cx, |p, cx| {
-                        *p = proc_list.into_iter().map(|pi| pi.name).collect();
-                        cx.notify();
-                    });
-                }
+                procedures.update(cx, |p, cx| {
+                    *p = procedures_list;
+                    cx.notify();
+                });
 
                 status_msg.update(cx, |msg, cx| {
                     *msg = format!("Loaded objects for {}", database);
                     cx.notify();
                 });
-            })
-            .ok();
-        })
-        .detach();
+            }).ok();
+        }).detach();
     }
 
     fn render_tab_buttons(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -191,7 +184,7 @@ impl DatabaseObjectsPanel {
         index: usize,
         count: usize,
         active_idx: usize,
-        cx: &mut Context<Self>,
+        _cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let is_active = index == active_idx;
         let active_tab = self.active_tab.clone();
@@ -298,76 +291,5 @@ impl Render for DatabaseObjectsPanel {
 impl Focusable for DatabaseObjectsPanel {
     fn focus_handle(&self, _cx: &App) -> FocusHandle {
         self.focus_handle.clone()
-    }
-}
-
-impl Panel for DatabaseObjectsPanel {
-    fn panel_name(&self) -> &'static str {
-        "DatabaseObjects"
-    }
-
-    fn tab_name(&self, cx: &App) -> Option<SharedString> {
-        if let Some(db) = self.current_database.read(cx).as_ref() {
-            Some(format!("Objects - {}", db).into())
-        } else {
-            Some("Objects".into())
-        }
-    }
-
-    fn title(&self, _window: &Window, cx: &App) -> AnyElement {
-        h_flex()
-            .items_center()
-            .gap_2()
-            .child(IconName::Folder)
-            .child(if let Some(db) = self.current_database.read(cx).as_ref() {
-                format!("Objects - {}", db)
-            } else {
-                "Objects".to_string()
-            })
-            .into_any_element()
-    }
-
-    fn title_style(&self, _cx: &App) -> Option<TitleStyle> {
-        None
-    }
-
-    fn title_suffix(&self, _window: &mut Window, _cx: &mut App) -> Option<AnyElement> {
-        None
-    }
-
-    fn closable(&self, _cx: &App) -> bool {
-        false
-    }
-
-    fn zoomable(&self, _cx: &App) -> Option<PanelControl> {
-        None
-    }
-
-    fn visible(&self, _cx: &App) -> bool {
-        true
-    }
-
-    fn set_active(&mut self, _active: bool, _window: &mut Window, _cx: &mut App) {}
-
-    fn set_zoomed(&mut self, _zoomed: bool, _window: &mut Window, _cx: &mut App) {}
-
-    fn on_added_to(&mut self, _tab_panel: WeakEntity<TabPanel>, _window: &mut Window, _cx: &mut App) {}
-
-    fn on_removed(&mut self, _window: &mut Window, _cx: &mut App) {}
-
-    fn dropdown_menu(&self, this: PopupMenu, _window: &Window, _cx: &App) -> PopupMenu {
-        this
-    }
-
-    fn toolbar_buttons(&self, _window: &mut Window, _cx: &mut App) -> Option<Vec<Button>> {
-        None
-    }
-
-    fn dump(&self, _cx: &App) -> PanelState {
-        PanelState::new(self)
-    }
-
-    fn inner_padding(&self, _cx: &App) -> bool {
-        false
     }
 }

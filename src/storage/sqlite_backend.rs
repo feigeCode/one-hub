@@ -6,7 +6,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use crate::storage::models::StoredConnection;
+use crate::storage::models::{StoredConnection, ConnectionType};
 use db::DatabaseType;
 
 /// SQLite storage backend
@@ -166,6 +166,7 @@ impl SqliteStorage {
                 id: Some(row.get("id")),
                 name: row.get("name"),
                 db_type,
+                connection_type: ConnectionType::Database,
                 host: row.get("host"),
                 port: row.get::<i64, _>("port") as u16,
                 username: row.get("username"),
@@ -218,6 +219,7 @@ impl SqliteStorage {
                 id: Some(row.get("id")),
                 name: row.get("name"),
                 db_type,
+                connection_type: ConnectionType::Database,
                 host: row.get("host"),
                 port: row.get::<i64, _>("port") as u16,
                 username: row.get("username"),

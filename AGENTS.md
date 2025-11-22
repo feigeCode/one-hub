@@ -7,7 +7,7 @@
 **不要修改代码格式**
 **不要修改无关文件**
 **不要修改任何代码警告**
-
+gpui源码目录在：/Users/hufei/RustroverProjects/zed/crates/gpui
 
 ## 编码规则
 

@@ -5,6 +5,8 @@ mod db_tree_view;
 // mod data_export;
 mod tab_container;
 mod tab_contents;
+mod table_data_tab;
+mod table_structure_tab;
 // mod data_import;
 mod context_menu_tree;
 mod storage;

@@ -1,42 +1,251 @@
 use std::any::Any;
-use gpui::{div, px, AnyElement, App, Entity, FontWeight, Hsla, InteractiveElement, IntoElement, ParentElement, SharedString, StatefulInteractiveElement, Styled, Window};
+use anyhow::Error;
+use gpui::{div, px, AnyElement, App, AppContext, Context, Entity, FontWeight, Hsla, InteractiveElement, IntoElement, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Window};
 use gpui::prelude::FluentBuilder;
-use gpui_component::{h_flex, v_flex, ActiveTheme, IconName};
+use gpui_component::{button::Button, h_flex, v_flex, ActiveTheme, IconName, Selectable, ThemeMode};
+use crate::connection_store::ConnectionStore;
 use crate::database_tab::DatabaseTabContent;
-use crate::onehup_app::{ConnectionInfo, ConnectionType};
+use crate::db_connection_form::{DbConnectionForm, DbConnectionFormEvent, DbFormConfig};
+use crate::setting_tab::SettingsTabContent;
+use crate::storage::{StoredConnection, ConnectionType};
 use crate::tab_container::{TabContainer, TabContent, TabContentType, TabItem};
+use crate::themes::SwitchThemeMode;
+use db::{DatabasePlugin, DatabaseType, DbConnectionConfig};
 
-
-
-// 首页内容
-pub struct HomeTabContent {
-    connections: Vec<ConnectionInfo>,
+// HomePage Entity - 管理 home 页面的所有状态
+pub struct HomePage {
+    selected_filter: ConnectionType,
+    connections: Vec<StoredConnection>,
     tab_container: Entity<TabContainer>,
+    connection_form: Option<Entity<DbConnectionForm>>,
+    connection_store: ConnectionStore,
 }
 
-impl HomeTabContent {
-    pub fn new(connections: Vec<ConnectionInfo>, tab_container: Entity<TabContainer>) -> Self {
+impl HomePage {
+    pub fn new(connections: Vec<StoredConnection>, tab_container: Entity<TabContainer>) -> Self {
+        let connection_store = ConnectionStore::new().expect("Failed to create connection store");
         Self {
+            selected_filter: ConnectionType::All,
             connections,
             tab_container,
+            connection_form: None,
+            connection_store,
         }
     }
-}
 
-impl TabContent for HomeTabContent {
-    fn title(&self) -> SharedString {
-        "首页".into()
+    fn show_connection_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let form = cx.new(|cx| {
+            DbConnectionForm::new(DbFormConfig::mysql(), window, cx)
+        });
+
+        // 订阅表单事件
+        cx.subscribe_in(&form, window, |this, form, event, window, cx| {
+            match event {
+                DbConnectionFormEvent::TestConnection(db_type, config) => {
+                    this.handle_test_connection(form.clone(), *db_type, config.clone(), window, cx);
+                }
+                DbConnectionFormEvent::Save(db_type, config) => {
+                    this.handle_save_connection(*db_type, config.clone(), window, cx);
+                }
+                DbConnectionFormEvent::Cancel => {
+                    this.connection_form = None;
+                    cx.notify();
+                }
+            }
+        }).detach();
+
+        self.connection_form = Some(form);
+        cx.notify();
     }
 
-    fn icon(&self) -> Option<IconName> {
-        Some(IconName::File)
+    fn handle_test_connection(
+        &mut self,
+        form: Entity<DbConnectionForm>,
+        db_type: DatabaseType,
+        config: DbConnectionConfig,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let global_state = cx.global::<db::GlobalDbState>().clone();
+        cx.spawn(async move |_, cx| {
+            let manager = global_state.db_manager;
+
+            // Test connection and collect result
+            let test_result = async {
+                let db_plugin = manager.get_plugin(&db_type)?;
+                let conn = db_plugin.create_connection(config).await?;
+                conn.ping().await?;
+                Ok::<bool, Error>(true)
+            }.await;
+
+            match test_result {
+                Ok(_) => {
+                    form.update(cx, |form, cx1| {
+                        form.set_test_result(Ok(true), cx1)
+                    })
+                }
+                Err(_) => {
+                    form.update(cx, |form, cx1| {
+                        form.set_test_result(Err("测试连接失败".to_string()), cx1)
+                    })
+                }
+            }
+        }).detach();
     }
 
-    fn closeable(&self) -> bool {
-        false // 首页不可关闭
+    fn handle_save_connection(
+        &mut self,
+        _db_type: DatabaseType,
+        config: DbConnectionConfig,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // 保存到存储
+        let stored = StoredConnection {
+            id: None,
+            name: config.name.clone(),
+            db_type: config.database_type.clone(),
+            connection_type: ConnectionType::Database,
+            host: config.host.clone(),
+            port: config.port,
+            username: config.username.clone(),
+            password: config.password.clone(),
+            database: config.database.clone(),
+            created_at: None,
+            updated_at: None,
+        };
+        let clone_stored = stored.clone();
+        match self.connection_store.save_connection(stored) {
+            Ok(_) => {
+                self.connections.push(clone_stored);
+
+                // 关闭表单
+                self.connection_form = None;
+                cx.notify();
+            }
+            Err(e) => {
+                tracing::error!("Failed to save connection: {}", e);
+            }
+        }
     }
 
-    fn render_content(&self, _window: &mut Window, cx: &mut App) -> AnyElement {
+    pub fn add_settings_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.tab_container.update(cx, |tc, cx| {
+            // 检查设置标签是否已存在
+            let settings_type = TabContentType::Custom("settings".to_string());
+            if !tc.has_tab_type(&settings_type) {
+                let settings_tab = TabItem::new("settings", SettingsTabContent::new());
+                tc.add_and_activate_tab(settings_tab, cx);
+            } else {
+                // 如果已存在，则激活它
+                tc.activate_or_create(&settings_type, || {
+                    TabItem::new("settings", SettingsTabContent::new())
+                }, window, cx);
+            }
+        });
+    }
+
+    fn render_toolbar(&self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        h_flex()
+            .p_4()
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .justify_between()
+            .items_center()
+            .child(
+                h_flex()
+                    .gap_2()
+                    .child(
+                        Button::new("new_connect")
+                            .icon(IconName::Plus)
+                            .label("NEW CONNECT")
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.show_connection_form(window, cx);
+                            }))
+                    )
+            )
+    }
+
+    fn render_sidebar(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let filter_types = vec![
+            ConnectionType::All,
+            ConnectionType::Database,
+            ConnectionType::SshSftp,
+            ConnectionType::Redis,
+            ConnectionType::MongoDB,
+        ];
+
+        v_flex()
+            .w(px(200.0))
+            .h_full()
+            .bg(cx.theme().muted)
+            .border_r_1()
+            .border_color(cx.theme().border)
+            .child(
+                // 侧边栏过滤选项
+                v_flex()
+                    .flex_1()
+                    .w_full()
+                    .p_4()
+                    .gap_2()
+                    .children(
+                        filter_types.into_iter().map(|filter_type| {
+                            let is_selected = self.selected_filter == filter_type;
+                            let filter_type_clone = filter_type.clone();
+
+                            Button::new(filter_type.label())
+                                .icon(filter_type.icon())
+                                .label(filter_type.label())
+                                .w_full()
+                                .justify_start()
+                                .when(is_selected, |this| {
+                                    this.selected(true)
+                                })
+                                .on_click(cx.listener(move |this: &mut HomePage, _, _, cx| {
+                                    this.selected_filter = filter_type_clone.clone();
+                                    cx.notify();
+                                }))
+                        })
+                    )
+            )
+            .child(
+                // 底部区域：主题切换和用户头像
+                v_flex()
+                    .w_full()
+                    .p_4()
+                    .gap_3()
+                    .border_t_1()
+                    .border_color(cx.theme().border)
+                    .child(
+                        Button::new("theme_toggle")
+                            .icon(IconName::Palette)
+                            .label("切换主题")
+                            .w_full()
+                            .justify_start()
+                            .on_click(cx.listener(|_this: &mut HomePage, _, _window, cx| {
+                                // 切换主题模式
+                                let current_mode = cx.theme().mode;
+                                let new_mode = match current_mode {
+                                    ThemeMode::Light => ThemeMode::Dark,
+                                    ThemeMode::Dark => ThemeMode::Light,
+                                };
+                                cx.dispatch_action(&SwitchThemeMode(new_mode));
+                            }))
+                    )
+                    .child(
+                        Button::new("open_settings")
+                            .icon(IconName::Settings)
+                            .label("设置")
+                            .w_full()
+                            .justify_start()
+                            .on_click(cx.listener(|this: &mut HomePage, _, window, cx| {
+                                this.add_settings_tab(window, cx);
+                            }))
+                    )
+            )
+    }
+
+    fn render_connection_cards(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let tab_container = self.tab_container.clone();
 
         let connection_cards: Vec<_> = self.connections.iter().map(|conn| {
@@ -74,7 +283,7 @@ impl TabContent for HomeTabContent {
                     let should_create = !tab_container_clone.read(cx_inner).has_tab_type(&tab_type);
 
                     if should_create {
-                        // 在 update 之前创建 DatabaseTabContent
+                        // 创建 DatabaseTabContent
                         let db_content = DatabaseTabContent::new(conn_clone.clone(), window_inner, cx_inner);
                         let db_tab = TabItem::new(tab_id.clone(), db_content);
 
@@ -154,7 +363,65 @@ impl TabContent for HomeTabContent {
                     .gap_4()
                     .children(connection_cards)
             )
-            .into_any_element()
+    }
+}
+
+impl Render for HomePage {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let form = self.connection_form.clone();
+
+        h_flex()
+            .size_full()
+            .child(self.render_sidebar(window, cx))
+            .child(
+                v_flex()
+                    .flex_1()
+                    .h_full()
+                    .bg(cx.theme().background)
+                    .child(self.render_toolbar(window, cx))
+                    .child(
+                        div()
+                            .flex_1()
+                            .w_full()
+                            .overflow_hidden()
+                            .child(self.render_connection_cards(cx))
+                    )
+            )
+            .when_some(form, |this, form| {
+                this.child(form)
+            })
+    }
+}
+
+// HomeTabContent - TabContent 的薄包装层
+pub struct HomeTabContent {
+    home_page: Entity<HomePage>,
+}
+
+impl HomeTabContent {
+    pub fn new(connections: Vec<StoredConnection>, tab_container: Entity<TabContainer>, window: &mut Window, cx: &mut App) -> Self {
+        let home_page = cx.new(|_cx| HomePage::new(connections, tab_container));
+        Self {
+            home_page,
+        }
+    }
+}
+
+impl TabContent for HomeTabContent {
+    fn title(&self) -> SharedString {
+        "首页".into()
+    }
+
+    fn icon(&self) -> Option<IconName> {
+        Some(IconName::LayoutDashboard)
+    }
+
+    fn closeable(&self) -> bool {
+        false // 首页不可关闭
+    }
+
+    fn render_content(&self, _window: &mut Window, _cx: &mut App) -> AnyElement {
+        self.home_page.clone().into_any_element()
     }
 
     fn content_type(&self) -> TabContentType {

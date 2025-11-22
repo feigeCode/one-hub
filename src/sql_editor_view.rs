@@ -10,7 +10,7 @@ use gpui_component::resizable::{v_resizable, resizable_panel};
 use gpui_component::list::ListItem;
 use gpui_component::StyledExt;
 use gpui_component::dock::{Panel, PanelControl, PanelEvent, PanelState, PanelView, TabPanel, TitleStyle};
-use db::{GlobalDbState, ExecOptions, SqlResult, spawn_result};
+use db::{GlobalDbState, ExecOptions, SqlResult, DbConnectionConfig};
 use gpui_component::menu::PopupMenu;
 use crate::sql_editor::SqlEditor;
 use crate::tab_container::{TabContent, TabContentType};
@@ -29,16 +29,14 @@ pub struct SqlResultTab {
 pub struct SqlEditorTabContent {
     title: SharedString,
     editor: Entity<SqlEditor>,
+    // Connection configuration for this SQL editor
+    config: DbConnectionConfig,
     // Multiple result tabs
     result_tabs: Arc<RwLock<Vec<SqlResultTab>>>,
     active_result_tab: Arc<RwLock<usize>>,
     status_msg: Entity<String>,
     current_database: Arc<RwLock<Option<String>>>,
     database_select: Entity<SelectState<SearchableVec<String>>>,
-    // Add fields for tracking database loading
-    databases_loading: Arc<std::sync::atomic::AtomicBool>,
-    databases_cache: Arc<RwLock<Vec<String>>>,
-    databases_loaded: Arc<std::sync::atomic::AtomicBool>,
     // Add focus handle
     focus_handle: FocusHandle,
 }
@@ -49,11 +47,23 @@ impl SqlEditorTabContent {
         window: &mut Window,
         cx: &mut App,
     ) -> Self {
-        Self::new_with_database(title, None, window, cx)
+        // Create a default/empty config - should not be used in practice
+        let config = DbConnectionConfig {
+            id: "".to_string(),
+            database_type: db::DatabaseType::MySQL,
+            name: "No Connection".to_string(),
+            host: "localhost".to_string(),
+            port: 3306,
+            username: "".to_string(),
+            password: "".to_string(),
+            database: None,
+        };
+        Self::new_with_config(title, config, None, window, cx)
     }
 
-    pub fn new_with_database(
+    pub fn new_with_config(
         title: impl Into<SharedString>,
+        config: DbConnectionConfig,
         initial_database: Option<String>,
         window: &mut Window,
         cx: &mut App,
@@ -73,21 +83,15 @@ impl SqlEditorTabContent {
             SelectState::new(SearchableVec::new(vec![]), None, window, cx)
         });
 
-        let databases_loading = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let databases_cache = Arc::new(RwLock::new(Vec::new()));
-        let databases_loaded = Arc::new(std::sync::atomic::AtomicBool::new(false));
-
         let instance = Self {
             title: title.into(),
             editor: editor.clone(),
+            config: config.clone(),
             result_tabs,
             active_result_tab,
             status_msg,
             current_database: current_database.clone(),
             database_select: database_select.clone(),
-            databases_loading,
-            databases_cache,
-            databases_loaded,
             focus_handle,
         };
 
@@ -103,16 +107,10 @@ impl SqlEditorTabContent {
                     *guard = Some(db_name.clone());
                 }
 
-                let global_state = cx.global::<GlobalDbState>().clone();
-                let db = db_name.clone();
                 let instance = instance_clone.clone();
+                let db = db_name.clone();
 
                 cx.spawn(async move |cx| {
-                    // Set current database in connection pool
-                    global_state.connection_pool
-                        .set_current_database(Some(db.clone()))
-                        .await;
-
                     // Update editor schema
                     cx.update(|cx| {
                         instance.update_schema_for_db(&db, cx);
@@ -121,62 +119,21 @@ impl SqlEditorTabContent {
             }
         }).detach();
 
-        // If initial database is provided, set it immediately and load schema
+        // If initial database is provided, load schema
         if let Some(db) = initial_database {
-            // Set current database
-            if let Ok(mut guard) = instance.current_database.write() {
-                *guard = Some(db.clone());
-            }
-
-            let global_state = cx.global::<GlobalDbState>().clone();
-            let db_clone = db.clone();
             let instance_for_schema = instance.clone();
+            let db_clone = db.clone();
 
             cx.spawn(async move |cx| {
-                // Clone for first async block
-                let global_state_check = global_state.clone();
-
-                // Use spawn_result to bridge GPUI (smol) and Tokio runtimes
-                let connection_check = spawn_result(async move {
-                    // Wait for connection
-                    let max_retries = 10;
-                    let mut retries = 0;
-                    while retries < max_retries {
-                        if global_state_check.connection_pool.is_connected().await {
-                            return Ok(());
-                        }
-                        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                        retries += 1;
-                    }
-
-                    if global_state_check.connection_pool.is_connected().await {
-                        Ok(())
-                    } else {
-                        Err(anyhow::anyhow!("Failed to connect to database"))
-                    }
-                }).await;
-
-                if connection_check.is_err() {
-                    eprintln!("Failed to connect to database for schema loading");
-                    return;
-                }
-
-                // Set current database and update schema using spawn_result
-                let result = spawn_result(async move {
-                    global_state.connection_pool
-                        .set_current_database(Some(db_clone.clone()))
-                        .await;
-                    Ok(db_clone)
-                }).await;
-
-                if let Ok(db) = result {
-                    // Update editor schema
-                    cx.update(|cx| {
-                        instance_for_schema.update_schema_for_db(&db, cx);
-                    }).ok();
-                }
+                // Update editor schema
+                cx.update(|cx| {
+                    instance_for_schema.update_schema_for_db(&db_clone, cx);
+                }).ok();
             }).detach();
         }
+
+        // Load databases in background
+        instance.load_databases_async(cx);
 
         instance
     }
@@ -186,63 +143,19 @@ impl SqlEditorTabContent {
     }
 
     /// Load databases into the select dropdown
-    pub fn load_databases(&self, window: &mut Window, cx: &mut App) {
-        // Check if already loading
-        if self.databases_loading.load(std::sync::atomic::Ordering::Relaxed) {
-            return;
-        }
-
-        // Check if already loaded
-        if self.databases_loaded.load(std::sync::atomic::Ordering::Relaxed) {
-            // Already loaded, just update the UI with cached data
-            let databases = self.databases_cache.read().unwrap().clone();
-            if !databases.is_empty() {
-                self.update_dropdown_with_databases(databases, window, cx);
-            }
-            return;
-        }
-
-        // Mark as loading
-        self.databases_loading.store(true, std::sync::atomic::Ordering::Relaxed);
-
-        // Set initial loading state
-        self.database_select.update(cx, |state, cx| {
-            let items = SearchableVec::new(vec!["Loading databases...".to_string()]);
-            state.set_items(items, window, cx);
-        });
-
-        // Clone what we need for async
+    fn load_databases_async(&self, cx: &mut App) {
         let global_state = cx.global::<GlobalDbState>().clone();
+        let config = self.config.clone();
         let current_database = self.current_database.clone();
-        let databases_cache = self.databases_cache.clone();
-        let databases_loaded = self.databases_loaded.clone();
-        let databases_loading = self.databases_loading.clone();
         let database_select = self.database_select.clone();
 
         // Spawn async task to load databases
         cx.spawn(async move |cx| {
-            // Check if connected
-            if !global_state.connection_pool.is_connected().await {
-                eprintln!("Not connected to database");
-                databases_loading.store(false, std::sync::atomic::Ordering::Relaxed);
-                return;
-            }
-
-            // Get current connection and config
-            let conn_arc = match global_state.connection_pool.get_current_connection().await {
-                Some(c) => c,
-                None => {
-                    eprintln!("No current connection");
-                    databases_loading.store(false, std::sync::atomic::Ordering::Relaxed);
-                    return;
-                }
-            };
-
-            let config = match global_state.connection_pool.get_current_connection_config().await {
-                Some(c) => c,
-                None => {
-                    eprintln!("No connection config");
-                    databases_loading.store(false, std::sync::atomic::Ordering::Relaxed);
+            // Get connection
+            let conn_arc = match global_state.connection_pool.get_connection(config.clone(), &global_state.db_manager).await {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("Failed to get connection: {}", e);
                     return;
                 }
             };
@@ -252,7 +165,6 @@ impl SqlEditorTabContent {
                 Ok(p) => p,
                 Err(e) => {
                     eprintln!("Failed to get plugin: {}", e);
-                    databases_loading.store(false, std::sync::atomic::Ordering::Relaxed);
                     return;
                 }
             };
@@ -263,36 +175,17 @@ impl SqlEditorTabContent {
                 Ok(dbs) => dbs,
                 Err(e) => {
                     eprintln!("Failed to list databases: {}", e);
-                    databases_loading.store(false, std::sync::atomic::Ordering::Relaxed);
                     return;
                 }
             };
 
             // Get current database
-            let current_db = if let Ok(guard) = current_database.read() {
-                guard.clone()
-            } else {
-                global_state.connection_pool.current_database().await
-            };
+            let current_db = current_database.read().unwrap().clone();
 
             eprintln!("Loaded {} databases from server", databases.len());
             eprintln!("Current database: {:?}", current_db);
 
-            // Store in cache
-            *databases_cache.write().unwrap() = databases.clone();
-
-            // Update current database if we got one
-            if let Some(db) = &current_db {
-                if let Ok(mut guard) = current_database.write() {
-                    *guard = Some(db.clone());
-                }
-            }
-
-            // Mark as loaded
-            databases_loaded.store(true, std::sync::atomic::Ordering::Relaxed);
-            databases_loading.store(false, std::sync::atomic::Ordering::Relaxed);
-
-            // Update UI with loaded databases - access window through cx.update_window
+            // Update UI with loaded databases
             let result = cx.update(|cx| {
                 if let Some(window_id) = cx.active_window() {
                     cx.update_window(window_id, |_entity, window, cx| {
@@ -326,221 +219,21 @@ impl SqlEditorTabContent {
         }).detach();
     }
 
-    /// Helper to update the dropdown with databases
-    fn update_dropdown_with_databases(&self, databases: Vec<String>, window: &mut Window, cx: &mut App) {
-        self.database_select.update(cx, |state, cx| {
-            if !databases.is_empty() {
-                eprintln!("Updating dropdown with {} databases", databases.len());
-                let items = SearchableVec::new(databases.clone());
-                state.set_items(items, window, cx);
-
-                // Set current selection if there's a current database
-                if let Ok(guard) = self.current_database.read() {
-                    if let Some(current_db) = guard.as_ref() {
-                        if let Some(index) = databases.iter().position(|d| d == current_db) {
-                            use gpui_component::IndexPath;
-                            state.set_selected_index(Some(IndexPath::new(index)), window, cx);
-                        }
-                    }
-                }
-            } else {
-                let items = SearchableVec::new(vec!["No databases available".to_string()]);
-                state.set_items(items, window, cx);
-            }
-        });
-    }
-
-    /// Try to update dropdown if databases are loaded (call from render)
-    pub fn try_update_dropdown(&self, window: &mut Window, cx: &mut App) {
-        // Check if databases are loaded but not yet displayed
-        if self.databases_loaded.load(std::sync::atomic::Ordering::Relaxed) {
-            let databases = self.databases_cache.read().unwrap().clone();
-            if !databases.is_empty() {
-                // Check if dropdown is still showing "Loading..."
-                self.database_select.update(cx, |state, cx| {
-                    // Get current items to check if we need to update
-                    // We'll just update regardless to ensure it's correct
-                    let items = SearchableVec::new(databases.clone());
-                    state.set_items(items, window, cx);
-
-                    // Set current selection if there's a current database
-                    if let Ok(guard) = self.current_database.read() {
-                        if let Some(current_db) = guard.as_ref() {
-                            if let Some(index) = databases.iter().position(|d| d == current_db) {
-                                use gpui_component::IndexPath;
-                                state.set_selected_index(Some(IndexPath::new(index)), window, cx);
-                            }
-                        }
-                    }
-                });
-            }
-        }
-    }
-
-    /// Manually update databases when we have window access
-    pub fn update_databases_now(&self, window: &mut Window, cx: &mut App) {
-        let global_state = cx.global::<GlobalDbState>().clone();
-        let current_database = self.current_database.clone();
-
-        // Set refreshing placeholder
-        self.database_select.update(cx, |state, cx| {
-            let items = SearchableVec::new(vec!["Refreshing...".to_string()]);
-            state.set_items(items, window, cx);
-        });
-
-        // Try to load and update immediately
-        cx.spawn(async move |cx| {
-            if !global_state.connection_pool.is_connected().await {
-                eprintln!("Not connected to database");
-                return;
-            }
-
-            // Get current connection and config
-            let conn_arc = match global_state.connection_pool.get_current_connection().await {
-                Some(c) => c,
-                None => {
-                    eprintln!("No current connection");
-                    return;
-                }
-            };
-
-            let config = match global_state.connection_pool.get_current_connection_config().await {
-                Some(c) => c,
-                None => {
-                    eprintln!("No connection config");
-                    return;
-                }
-            };
-
-            // Get plugin
-            let plugin = match global_state.db_manager.get_plugin(&config.database_type) {
-                Ok(p) => p,
-                Err(e) => {
-                    eprintln!("Failed to get plugin: {}", e);
-                    return;
-                }
-            };
-
-            // List databases
-            let conn = conn_arc.read().await;
-            if let Ok(databases) = plugin.list_databases(&**conn).await {
-                let current_db = if let Ok(guard) = current_database.read() {
-                    guard.clone()
-                } else {
-                    global_state.connection_pool.current_database().await
-                };
-
-                eprintln!("update_databases_now: {} databases loaded", databases.len());
-
-                cx.update(|_cx| {
-                    eprintln!("Ready to update with {} databases", databases.len());
-                }).ok();
-            }
-        }).detach();
-    }
-
-    /// Refresh databases synchronously (call this after load_databases completes)
-    pub fn refresh_databases(&self, databases: Vec<String>, current_db: Option<String>, window: &mut Window, cx: &mut App) {
-        self.database_select.update(cx, |state, cx| {
-            if !databases.is_empty() {
-                let items = SearchableVec::new(databases.clone());
-                state.set_items(items, window, cx);
-
-                // Set current selection if there's a current database
-                if let Some(db) = current_db.as_ref() {
-                    if let Some(index) = databases.iter().position(|d| d == db) {
-                        use gpui_component::IndexPath;
-                        state.set_selected_index(Some(IndexPath::new(index)), window, cx);
-                    }
-                }
-            } else {
-                let items = SearchableVec::new(vec!["No databases".to_string()]);
-                state.set_items(items, window, cx);
-            }
-        });
-
-        // Update our current database tracking
-        if let Some(db) = current_db {
-            if let Ok(mut guard) = self.current_database.write() {
-                *guard = Some(db);
-            }
-        }
-    }
-
-    /// Initialize database list after connection
-    pub fn init_databases(&mut self, window: &mut Window, cx: &mut App) {
-        let global_state = cx.global::<GlobalDbState>().clone();
-
-        // For immediate feedback, set loading state
-        self.database_select.update(cx, |state, cx| {
-            let items = SearchableVec::new(vec!["Connecting...".to_string()]);
-            state.set_items(items, window, cx);
-        });
-
-        // Check if we're connected and load databases
-        cx.spawn(async move |_cx| {
-            if !global_state.connection_pool.is_connected().await {
-                eprintln!("Not connected to database");
-                return;
-            }
-
-            // Get current connection and config
-            let conn_arc = match global_state.connection_pool.get_current_connection().await {
-                Some(c) => c,
-                None => {
-                    eprintln!("No current connection");
-                    return;
-                }
-            };
-
-            let config = match global_state.connection_pool.get_current_connection_config().await {
-                Some(c) => c,
-                None => {
-                    eprintln!("No connection config");
-                    return;
-                }
-            };
-
-            // Get plugin
-            let plugin = match global_state.db_manager.get_plugin(&config.database_type) {
-                Ok(p) => p,
-                Err(e) => {
-                    eprintln!("Failed to get plugin: {}", e);
-                    return;
-                }
-            };
-
-            // List databases
-            let conn = conn_arc.read().await;
-            if let Ok(databases) = plugin.list_databases(&**conn).await {
-                eprintln!("Available databases: {:?}", databases);
-            }
-        }).detach();
-    }
-
-
     /// Update SQL editor schema with tables and columns from current database
     pub fn update_schema_for_db(&self, database: &str, cx: &mut App) {
         use crate::sql_editor::SqlSchema;
 
         let global_state = cx.global::<GlobalDbState>().clone();
+        let config = self.config.clone();
         let editor = self.editor.clone();
         let db = database.to_string();
 
         cx.spawn(async move |cx| {
-            // Get current connection and config
-            let conn_arc = match global_state.connection_pool.get_current_connection().await {
-                Some(c) => c,
-                None => {
-                    eprintln!("No current connection");
-                    return;
-                }
-            };
-
-            let config = match global_state.connection_pool.get_current_connection_config().await {
-                Some(c) => c,
-                None => {
-                    eprintln!("No connection config");
+            // Get connection
+            let conn_arc = match global_state.connection_pool.get_connection(config.clone(), &global_state.db_manager).await {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("Failed to get connection: {}", e);
                     return;
                 }
             };
@@ -576,7 +269,8 @@ impl SqlEditorTabContent {
             for table in &tables {
                 if let Ok(columns) = plugin.list_columns(&**conn, &db, table).await {
                     let column_items: Vec<(String, String)> = columns.iter()
-                        .map(|c| (c.name.clone(), format!("{} - {}", c.data_type,
+                        .map(|c| (c.name.clone(), format!("{} - {}",
+c.data_type,
                             c.comment.as_ref().unwrap_or(&String::new()))))
                         .collect();
                     schema = schema.with_table_columns(table, column_items);
@@ -606,23 +300,14 @@ impl SqlEditorTabContent {
         let active_result_tab = self.active_result_tab.clone();
         let status_msg = self.status_msg.clone();
         let global_state = cx.global::<GlobalDbState>().clone();
+        let config = self.config.clone();
+        let current_database = self.current_database.clone();
 
         // Clear existing result tabs
         result_tabs.write().unwrap().clear();
         *active_result_tab.write().unwrap() = 0;
 
         cx.spawn(async move |cx| {
-            // Check connection
-            if !global_state.connection_pool.is_connected().await {
-                cx.update(|cx| {
-                    status_msg.update(cx, |msg, cx| {
-                        *msg = "Not connected to database".to_string();
-                        cx.notify();
-                    });
-                }).ok();
-                return;
-            }
-
             // Check if SQL is empty
             if sql.trim().is_empty() {
                 cx.update(|cx| {
@@ -634,13 +319,13 @@ impl SqlEditorTabContent {
                 return;
             }
 
-            // Get current connection
-            let conn_arc = match global_state.connection_pool.get_current_connection().await {
-                Some(c) => c,
-                None => {
+            // Get connection
+            let conn_arc = match global_state.connection_pool.get_connection(config.clone(), &global_state.db_manager).await {
+                Ok(c) => c,
+                Err(e) => {
                     cx.update(|cx| {
                         status_msg.update(cx, |msg, cx| {
-                            *msg = "No active connection".to_string();
+                            *msg = format!("Failed to get connection: {}", e);
                             cx.notify();
                         });
                     }).ok();
@@ -852,9 +537,6 @@ impl TabContent for SqlEditorTabContent {
     }
 
     fn render_content(&self, window: &mut Window, cx: &mut App) -> AnyElement {
-        // Try to update dropdown if databases have been loaded
-        self.try_update_dropdown(window, cx);
-
         let status_msg_render = self.status_msg.clone();
         let editor = self.editor.clone();
         let result_tabs = self.result_tabs.clone();
@@ -1237,14 +919,12 @@ impl Clone for SqlEditorTabContent {
         Self {
             title: self.title.clone(),
             editor: self.editor.clone(),
+            config: self.config.clone(),
             result_tabs: self.result_tabs.clone(),
             active_result_tab: self.active_result_tab.clone(),
             status_msg: self.status_msg.clone(),
             current_database: self.current_database.clone(),
             database_select: self.database_select.clone(),
-            databases_loading: self.databases_loading.clone(),
-            databases_cache: self.databases_cache.clone(),
-            databases_loaded: self.databases_loaded.clone(),
             focus_handle: self.focus_handle.clone(),
         }
     }
@@ -1314,8 +994,7 @@ impl Panel for SqlEditorTabContent {
     }
 
     fn on_added_to(&mut self, tab_panel: WeakEntity<TabPanel>, window: &mut Window, cx: &mut App) {
-        // Load databases when added to tab panel
-        self.load_databases(window, cx);
+        // No special handling needed when added to tab panel
     }
 
     fn on_removed(&mut self, window: &mut Window, cx: &mut App) {

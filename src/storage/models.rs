@@ -1,5 +1,37 @@
 use serde::{Deserialize, Serialize};
 use db::{DatabaseType, DbConnectionConfig};
+use gpui_component::IconName;
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub enum ConnectionType {
+    All,
+    Database,
+    SshSftp,
+    Redis,
+    MongoDB,
+}
+
+impl ConnectionType {
+    pub fn label(&self) -> &'static str {
+        match self {
+            ConnectionType::All => "全部",
+            ConnectionType::Database => "数据库",
+            ConnectionType::SshSftp => "SSH/SFTP",
+            ConnectionType::Redis => "Redis",
+            ConnectionType::MongoDB => "MongoDB",
+        }
+    }
+
+    pub fn icon(&self) -> IconName {
+        match self {
+            ConnectionType::All => IconName::Menu,
+            ConnectionType::Database => IconName::DATABASE,
+            ConnectionType::SshSftp => IconName::File,
+            ConnectionType::Redis => IconName::File,
+            ConnectionType::MongoDB => IconName::File,
+        }
+    }
+}
 
 /// Stored database connection with ID
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -8,6 +40,7 @@ pub struct StoredConnection {
     pub id: Option<i64>,
     pub name: String,
     pub db_type: DatabaseType,
+    pub connection_type: ConnectionType ,
     pub host: String,
     pub port: u16,
     pub username: String,
@@ -25,6 +58,7 @@ impl StoredConnection {
             id: None,
             name: connection.name,
             db_type,
+            connection_type: ConnectionType::Database,
             host: connection.host,
             port: connection.port,
             username: connection.username,
