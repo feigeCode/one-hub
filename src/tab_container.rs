@@ -3,7 +3,7 @@ use std::{any::Any, sync::Arc};
 use gpui::prelude::FluentBuilder;
 use gpui::StatefulInteractiveElement as _;
 use gpui::{div, px, AnyElement, App, AppContext, Context, InteractiveElement, IntoElement, MouseButton, ParentElement, Render, ScrollHandle, SharedString, Styled, Window};
-use gpui_component::{h_flex, v_flex, ActiveTheme, IconName, Size, StyledExt};
+use gpui_component::{h_flex, v_flex, ActiveTheme, IconName, Size};
 // ============================================================================
 // TabContent Trait - Strategy Pattern Interface
 // ============================================================================
@@ -35,6 +35,12 @@ pub trait TabContent: Send + Sync {
 
     /// Get tab content type for identification
     fn content_type(&self) -> TabContentType;
+
+    /// Get tab's preferred width size
+    /// Returns None to use container's default size
+    fn width_size(&self) -> Option<Size> {
+        None  // Default: use container's default size
+    }
 
     /// Enable downcasting to concrete types
     fn as_any(&self) -> &dyn Any;
@@ -144,10 +150,6 @@ pub struct TabContainer {
     left_padding: Option<gpui::Pixels>,
     /// Optional top padding for vertical centering (defaults to 0)
     top_padding: Option<gpui::Pixels>,
-    /// Maximum number of visible tabs before showing overflow menu
-    max_visible_tabs: Option<usize>,
-    /// Whether to show overflow dropdown menu
-    show_overflow_menu: bool,
     tab_bar_scroll_handle: ScrollHandle,
 }
 
@@ -157,7 +159,7 @@ impl TabContainer {
         Self {
             tabs: Vec::new(),
             active_index: 0,
-            size: Size::Small,
+            size: Size::Medium,
             show_menu: false,
             tab_bar_bg_color: None,
             tab_bar_border_color: None,
@@ -167,8 +169,6 @@ impl TabContainer {
             tab_close_button_color: None,
             left_padding: None,
             top_padding: None,
-            max_visible_tabs: None,
-            show_overflow_menu: false,
             tab_bar_scroll_handle: ScrollHandle::new(),
         }
     }
@@ -236,21 +236,6 @@ impl TabContainer {
         self
     }
 
-    /// Set maximum number of visible tabs before showing overflow menu
-    ///
-    /// When the number of tabs exceeds this value, remaining tabs will be accessible
-    /// through a dropdown menu.
-    ///
-    /// # Example
-    /// ```
-    /// TabContainer::new(window, cx)
-    ///     .with_max_visible_tabs(10)
-    /// ```
-    pub fn with_max_visible_tabs(mut self, max: usize) -> Self {
-        self.max_visible_tabs = Some(max);
-        self
-    }
-
     /// Set tab bar background color
     pub fn set_tab_bar_bg_color(&mut self, color: impl Into<Option<gpui::Hsla>>, cx: &mut Context<Self>) {
         self.tab_bar_bg_color = color.into();
@@ -290,7 +275,7 @@ impl TabContainer {
 
     /// Close a tab by index
     pub fn close_tab(&mut self, index: usize, cx: &mut Context<Self>) {
-        if index < self.tabs.len() && self.tabs[index].content.closeable() {
+        if index < self.tabs.len() && self.tabs[index].content().closeable() {
             self.tabs.remove(index);
 
             // Adjust active index if needed
@@ -314,7 +299,7 @@ impl TabContainer {
         if index < self.tabs.len() {
             // Deactivate old tab
             if let Some(old_tab) = self.tabs.get(self.active_index) {
-                old_tab.content.on_deactivate(window, cx);
+                old_tab.content().on_deactivate(window, cx);
             }
 
             self.tab_bar_scroll_handle.scroll_to_item(index);
@@ -323,7 +308,7 @@ impl TabContainer {
 
             // Activate new tab
             if let Some(new_tab) = self.tabs.get(self.active_index) {
-                new_tab.content.on_activate(window, cx);
+                new_tab.content().on_activate(window, cx);
             }
 
             cx.notify();
@@ -346,7 +331,7 @@ impl TabContainer {
     pub fn find_tab_by_type(&self, content_type: &TabContentType) -> Option<&TabItem> {
         self.tabs
             .iter()
-            .find(|t| &t.content.content_type() == content_type)
+            .find(|t| &t.content().content_type() == content_type)
     }
 
     /// Check if a tab with the given type exists
@@ -367,7 +352,7 @@ impl TabContainer {
         if let Some(index) = self
             .tabs
             .iter()
-            .position(|t| &t.content.content_type() == content_type)
+            .position(|t| &t.content().content_type() == content_type)
         {
             self.set_active_index(index, window, cx);
         } else {
@@ -417,10 +402,22 @@ impl TabContainer {
         }
     }
 
-    /// Toggle overflow menu visibility
-    pub fn toggle_overflow_menu(&mut self, cx: &mut Context<Self>) {
-        self.show_overflow_menu = !self.show_overflow_menu;
-        cx.notify();
+    /// Get the width for a specific tab
+    /// Priority: tab's own width_size() > container's default size
+    fn get_tab_width(&self, tab: &TabItem) -> gpui::Pixels {
+        let size = tab.content().width_size().unwrap_or(self.size);
+        self.size_to_pixels(size)
+    }
+
+    /// Convert Size enum to pixel width
+    fn size_to_pixels(&self, size: Size) -> gpui::Pixels {
+        match size {
+            Size::Size(pixels) => pixels,  // 自定义像素值
+            Size::XSmall => px(100.0),
+            Size::Small => px(140.0),
+            Size::Medium => px(180.0),
+            Size::Large => px(220.0),
+        }
     }
 
     pub fn render_tab_content(&self, window: &mut Window, cx: &mut App) -> impl IntoElement {
@@ -430,104 +427,8 @@ impl TabContainer {
             .w_full()
             .overflow_hidden()
             .when_some(self.active_tab(), |el, tab| {
-                el.child(tab.content.render_content(window, cx))
+                el.child(tab.content().render_content(window, cx))
             })
-    }
-
-    /// Render overflow menu with hidden tabs
-    fn render_overflow_menu(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
-        let view = cx.entity();
-        let text_color = self.tab_text_color.unwrap_or_else(|| gpui::white().into());
-        let hover_tab_color = self.inactive_tab_hover_color.unwrap_or_else(|| gpui::rgb(0x3a3a3a).into());
-        let active_tab_color = self.active_tab_bg_color.unwrap_or_else(|| gpui::rgb(0x4a4a4a).into());
-        let border_color = self.tab_bar_border_color.unwrap_or_else(|| gpui::rgb(0x1e1e1e).into());
-
-        // 计算溢出标签
-        let overflow_tabs: Vec<(usize, String, bool, bool)> = if let Some(max_visible) = self.max_visible_tabs {
-            self.tabs
-                .iter()
-                .enumerate()
-                .skip(max_visible)
-                .map(|(idx, tab)| (idx, tab.content.title().to_string(), idx == self.active_index, tab.content.closeable()))
-                .collect()
-        } else {
-            Vec::new()
-        };
-
-        div()
-            .absolute()
-            .top(px(40.0))
-            .right(px(8.0))
-            .bg(gpui::rgb(0x2d2d2d))
-            .border_1()
-            .border_color(border_color)
-            .rounded(px(6.0))
-            .shadow_lg()
-            .min_w(px(200.0))
-            .max_h(px(400.0))
-            .overflow_hidden()
-            .children(overflow_tabs.into_iter().map(|(idx, title, is_active, closeable)| {
-                let view_clone = view.clone();
-
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .w_full()
-                    .px_3()
-                    .py_2()
-                    .cursor_pointer()
-                    .when(is_active, |div| div.bg(active_tab_color))
-                    .when(!is_active, |div| div.hover(move |style| style.bg(hover_tab_color)))
-                    .on_mouse_down(MouseButton::Left, {
-                        let view_clone = view_clone.clone();
-                        move |_event, window, cx| {
-                            view_clone.update(cx, |this, cx| {
-                                this.set_active_index(idx, window, cx);
-                                this.show_overflow_menu = false;
-                                cx.notify();
-                            });
-                        }
-                    })
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap_2()
-                            .flex_1()
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .text_color(text_color)
-                                    .child(title)
-                            )
-                    )
-                    .when(closeable, |el| {
-                        let view_clone = view_clone.clone();
-                        el.child(
-                            div()
-                                .w(px(16.0))
-                                .h(px(16.0))
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .rounded(px(2.0))
-                                .cursor_pointer()
-                                .text_color(gpui::rgb(0xaaaaaa))
-                                .hover(|style| {
-                                    style
-                                        .bg(gpui::rgb(0x5a5a5a))
-                                        .text_color(text_color)
-                                })
-                                .on_mouse_down(MouseButton::Left, move |_event, _window, cx| {
-                                    view_clone.update(cx, |this, cx| {
-                                        this.close_tab(idx, cx);
-                                    });
-                                })
-                                .child("×")
-                        )
-                    })
-            }))
     }
 
     pub fn render_tab_bar(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -563,28 +464,28 @@ impl TabContainer {
                     .gap_1()
                     .track_scroll(&self.tab_bar_scroll_handle)
                     .children(self.tabs.iter().enumerate().map(|(idx, tab)| {
-                        let title = tab.content.title();
-                        let closeable = tab.content.closeable();
+                        let title = tab.content().title();
+                        let icon = tab.content().icon();
+                        let closeable = tab.content().closeable();
                         let is_active = idx == active_index;
                         let view_clone = view.clone();
                         let title_clone = title.clone();
+                        let tab_width = self.get_tab_width(tab);  // 动态获取宽度
 
                         div()
                             .id(idx)
                             .flex()
                             .flex_shrink_0()
-                            .flex_wrap()
                             .overflow_hidden()
                             .items_center()
+                            .gap_2()
                             .h(px(32.0))
-                            .min_w(px(120.0))
-                            .max_w(px(200.0))
+                            .w(tab_width)  // 使用动态宽度
                             .px_3()
                             .rounded(px(6.0))
                             .cursor_grab()
                             .when(is_active, |el| el.bg(active_tab_color))
                             .when(!is_active, |el| el.hover(move |style| style.bg(hover_tab_color)))
-                            // 使用 GPUI 原生拖放 API
                             .on_drag(
                                 DragTab::new(idx, title.clone()),
                                 |drag, _, _, cx| {
@@ -610,46 +511,53 @@ impl TabContainer {
                             .on_click(cx.listener(move |this, _event, window, cx| {
                                 this.set_active_index(idx, window, cx);
                             }))
+                            // 图标（如果有）
+                            .when_some(icon, |el, icon| {
+                                el.child(
+                                    div()
+                                        .flex_shrink_0()
+                                        .flex()
+                                        .items_center()
+                                        .child(icon)
+                                )
+                            })
+                            // 标签文字 - 可自动省略
                             .child(
                                 div()
-                                    .flex()
-                                    .items_center()
-                                    .gap_2()
-                                    .child(
-                                        // 标签文字
-                                        div()
-                                            .text_sm()
-                                            .text_color(text_color)
-                                            .child(title_clone.to_string())
-                                    )
-                                    .when(closeable, |element| {
-                                        let view_clone = view_clone.clone();
-                                        element.child(
-                                            // 关闭按钮
-                                            div()
-                                                .ml_2()
-                                                .w(px(16.0))
-                                                .h(px(16.0))
-                                                .flex()
-                                                .items_center()
-                                                .justify_center()
-                                                .rounded(px(2.0))
-                                                .cursor_pointer()
-                                                .text_color(close_btn_color)
-                                                .hover(|style| {
-                                                    style
-                                                        .bg(gpui::rgb(0x5a5a5a))
-                                                        .text_color(text_color)
-                                                })
-                                                .on_mouse_down(MouseButton::Left, move |_event, _window, cx| {
-                                                    view_clone.update(cx, |this, cx| {
-                                                        this.close_tab(idx, cx);
-                                                    });
-                                                })
-                                                .child("×")
-                                    )
-                                })
-                        )
+                                    .flex_1()
+                                    .overflow_hidden()
+                                    .text_sm()
+                                    .text_color(text_color)
+                                    .text_ellipsis()
+                                    .child(title_clone.to_string())
+                            )
+                            // 关闭按钮 - 不被挤压
+                            .when(closeable, |el| {
+                                let view_clone = view_clone.clone();
+                                el.child(
+                                    div()
+                                        .flex_shrink_0()
+                                        .w(px(16.0))
+                                        .h(px(16.0))
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .rounded(px(2.0))
+                                        .cursor_pointer()
+                                        .text_color(close_btn_color)
+                                        .hover(|style| {
+                                            style
+                                                .bg(gpui::rgb(0x5a5a5a))
+                                                .text_color(text_color)
+                                        })
+                                        .on_mouse_down(MouseButton::Left, move |_event, _window, cx| {
+                                            view_clone.update(cx, |this, cx| {
+                                                this.close_tab(idx, cx);
+                                            });
+                                        })
+                                        .child("×")
+                                )
+                            })
                     }))
             )
     }
@@ -657,8 +565,6 @@ impl TabContainer {
 
 impl Render for TabContainer {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let show_overflow_menu = self.show_overflow_menu && self.max_visible_tabs.is_some();
-
         // 渲染标签栏和内容
         div()
             .relative()
@@ -675,26 +581,5 @@ impl Render for TabContainer {
                         self.render_tab_content(window, cx)
                     )
             )
-            .when(show_overflow_menu, |el| {
-                el.child(
-                    // Overflow menu overlay
-                    div()
-                        .absolute()
-                        .top_0()
-                        .left_0()
-                        .w_full()
-                        .h_full()
-                        .on_mouse_down(MouseButton::Left, {
-                            let view = cx.entity();
-                            move |_event, _window, cx| {
-                                view.update(cx, |this, cx| {
-                                    this.show_overflow_menu = false;
-                                    cx.notify();
-                                });
-                            }
-                        })
-                        .child(self.render_overflow_menu(cx))
-                )
-            })
     }
 }

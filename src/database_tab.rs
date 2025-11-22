@@ -5,7 +5,7 @@ use gpui::{
     Hsla, IntoElement, InteractiveElement, ParentElement, Pixels, SharedString, Styled, Subscription, Window,
 };
 use gpui::prelude::FluentBuilder;
-use gpui_component::{h_flex, v_flex, ActiveTheme, IconName};
+use gpui_component::{h_flex, v_flex, ActiveTheme, IconName, Size};
 use gpui_component::button::ButtonVariants;
 use gpui_component::resizable::{h_resizable, resizable_panel};
 use crate::database_objects_panel::DatabaseObjectsPanel;
@@ -25,7 +25,7 @@ impl TabContent for ObjectsPanelWrapper {
     }
 
     fn icon(&self) -> Option<IconName> {
-        Some(IconName::Folder)
+        None
     }
 
     fn closeable(&self) -> bool {
@@ -42,6 +42,10 @@ impl TabContent for ObjectsPanelWrapper {
 
     fn as_any(&self) -> &dyn Any {
         self
+    }
+
+    fn width_size(&self) -> Option<Size> {
+        Some(Size::XSmall)
     }
 }
 
