@@ -1,25 +1,6 @@
-mod db_connection_form;
-mod sql_editor_view;
-mod sql_editor;
-mod db_tree_view;
-// mod data_export;
-mod tab_container;
-mod table_data_tab;
-mod table_structure_tab;
-// mod data_import;
-mod context_menu_tree;
-mod storage;
-mod connection_store;
-mod database_objects_tab;
-mod object_detail;
-
-mod themes;
 mod onehup_app;
 mod home;
-mod database_tab;
 mod setting_tab;
-mod results_delegate;
-mod sql_result_tab;
 
 use gpui::*;
 use gpui_component::Root;

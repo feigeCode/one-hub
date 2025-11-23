@@ -9,7 +9,7 @@
 //! - JSON (array of objects/arrays, or NDJSON)
 //! - SQL (raw script; no parsing/validation performed)
 //!
-//! This module is standalone and not wired into `main.rs` by default.
+//! This module is standalone and not wired into `lib` by default.
 //! To use it later, add `mod data_import;` and call the functions below.
 
 use std::fs;

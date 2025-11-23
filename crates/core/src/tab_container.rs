@@ -1,5 +1,4 @@
 use std::{any::Any, sync::Arc};
-
 use gpui::prelude::FluentBuilder;
 use gpui::StatefulInteractiveElement as _;
 use gpui::{div, px, AnyElement, App, AppContext, Context, InteractiveElement, IntoElement, MouseButton, ParentElement, Render, ScrollHandle, SharedString, Styled, Window};

@@ -3,14 +3,14 @@ use anyhow::Error;
 use gpui::{div, px, AnyElement, App, AppContext, Context, Entity, FontWeight, Hsla, InteractiveElement, IntoElement, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Window};
 use gpui::prelude::FluentBuilder;
 use gpui_component::{button::Button, h_flex, v_flex, ActiveTheme, IconName, Selectable, ThemeMode};
-use crate::connection_store::ConnectionStore;
-use crate::database_tab::DatabaseTabContent;
-use crate::db_connection_form::{DbConnectionForm, DbConnectionFormEvent, DbFormConfig};
+use core::connection_store::{ConnectionStore};
+use core::storage::{StoredConnection, ConnectionType};
+use db_view::database_tab::DatabaseTabContent;
 use crate::setting_tab::SettingsTabContent;
-use crate::storage::{StoredConnection, ConnectionType};
-use crate::tab_container::{TabContainer, TabContent, TabContentType, TabItem};
-use crate::themes::SwitchThemeMode;
+use core::themes::SwitchThemeMode;
 use db::{DatabasePlugin, DatabaseType, DbConnectionConfig};
+use db_view::db_connection_form::{DbConnectionForm, DbConnectionFormEvent, DbFormConfig};
+use core::tab_container::{TabContainer, TabContent, TabContentType, TabItem};
 
 // HomePage Entity - 管理 home 页面的所有状态
 pub struct HomePage {

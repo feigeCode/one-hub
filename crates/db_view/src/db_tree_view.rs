@@ -1,5 +1,6 @@
+use core::storage::StoredConnection;
 use std::collections::{HashMap, HashSet};
-use gpui::{App, AppContext, Context, Entity, IntoElement, InteractiveElement, ParentElement, Render, Styled, Window, div, AnyElement, StatefulInteractiveElement, EventEmitter, SharedString, Focusable, FocusHandle, WeakEntity};
+use gpui::{App, AppContext, Context, Entity, IntoElement, InteractiveElement, ParentElement, Render, Styled, Window, div, StatefulInteractiveElement, EventEmitter, SharedString, Focusable, FocusHandle, WeakEntity};
 use tracing::log::trace;
 use gpui_component::{
     ActiveTheme, IconName,
@@ -9,9 +10,8 @@ use gpui_component::{
     tree::TreeItem,
     v_flex,
 };
-use crate::context_menu_tree::{context_menu_tree, ContextMenuTreeState};
 use db::{GlobalDbState, DbNode, DbNodeType, spawn_result, DbConnectionConfig};
-use crate::storage::StoredConnection;
+use gpui_component::context_menu_tree::{context_menu_tree, ContextMenuTreeState};
 // ============================================================================
 // DbTreeView Events
 // ============================================================================

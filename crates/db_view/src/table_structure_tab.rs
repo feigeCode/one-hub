@@ -2,7 +2,7 @@ use std::any::Any;
 use std::sync::Arc;
 
 use gpui::{
-    div, AnyElement, App, AppContext, ClickEvent, Context, Entity, EventEmitter, Focusable, FocusHandle,
+    div, AnyElement, App, AppContext, ClickEvent, Context, Entity, Focusable, FocusHandle,
     IntoElement, ParentElement, Render, SharedString, Styled, Window, InteractiveElement,
     StatefulInteractiveElement,
 };
@@ -14,7 +14,7 @@ use gpui_component::{
 };
 
 use db::{ColumnInfo, DbConnectionConfig, GlobalDbState};
-use crate::tab_container::{TabContent, TabContentType};
+use core::tab_container::{TabContent, TabContentType};
 
 // ============================================================================
 // Table Structure Tab Content - Edit table structure

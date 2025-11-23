@@ -1,12 +1,12 @@
 use crate::home::HomeTabContent;
-use crate::tab_container::{TabContainer, TabItem};
-use crate::themes;
+use core::tab_container::{TabContainer, TabItem};
+use core::themes;
 use gpui::{div, px, App, AppContext, Context, Entity, IntoElement, KeyBinding, ParentElement, Render, Styled, Window};
 use gpui_component::dock::{ClosePanel, ToggleZoom};
 use gpui_component::ActiveTheme;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
-use crate::connection_store::ConnectionStore;
+use core::connection_store::ConnectionStore;
 
 pub fn init(cx: &mut App) {
 

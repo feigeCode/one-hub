@@ -1225,6 +1225,20 @@ dependencies = [
 [[package]]
 name = "core"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "db",
+ "dirs 6.0.0",
+ "gpui",
+ "gpui-component",
+ "once_cell",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tokio",
+ "tracing",
+]
 
 [[package]]
 name = "core-foundation"
@@ -1551,6 +1565,29 @@ dependencies = [
  "sqlx",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "db_view"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "core",
+ "db",
+ "futures",
+ "gpui",
+ "gpui-component",
+ "hex",
+ "lsp-types",
+ "once_cell",
+ "rand 0.8.5",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tokio",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -4859,8 +4896,9 @@ dependencies = [
  "anyhow",
  "assets",
  "async-trait",
+ "core",
  "db",
- "dirs 6.0.0",
+ "db_view",
  "gpui",
  "gpui-component",
  "gpui-macros",
@@ -4872,7 +4910,6 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
- "uuid",
 ]
 
 [[package]]

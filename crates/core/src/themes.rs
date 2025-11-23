@@ -26,7 +26,7 @@ pub fn init(cx: &mut App) {
     let json = std::fs::read_to_string(STATE_FILE).unwrap_or(String::default());
     tracing::info!("Load themes...");
     let state = serde_json::from_str::<State>(&json).unwrap_or_default();
-    if let Err(err) = ThemeRegistry::watch_dir(PathBuf::from("./themes"), cx, move |cx| {
+    if let Err(err) = ThemeRegistry::watch_dir(PathBuf::from("../../../themes"), cx, move |cx| {
         if let Some(theme) = ThemeRegistry::global(cx)
             .themes()
             .get(&state.theme)
@@ -72,8 +72,8 @@ pub fn init(cx: &mut App) {
 
 #[derive(Action, Clone, PartialEq)]
 #[action(namespace = themes, no_json)]
-pub(crate) struct SwitchTheme(pub(crate) SharedString);
+pub struct SwitchTheme(pub SharedString);
 
 #[derive(Action, Clone, PartialEq)]
 #[action(namespace = themes, no_json)]
-pub(crate) struct SwitchThemeMode(pub(crate) ThemeMode);
+pub struct SwitchThemeMode(pub ThemeMode);

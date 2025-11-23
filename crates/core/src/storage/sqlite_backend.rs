@@ -5,9 +5,8 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-
-use crate::storage::models::{StoredConnection, ConnectionType};
 use db::DatabaseType;
+use crate::storage::{ConnectionType, StoredConnection};
 
 /// SQLite storage backend
 pub struct SqliteStorage {

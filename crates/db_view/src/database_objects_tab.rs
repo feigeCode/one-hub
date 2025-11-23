@@ -1,9 +1,10 @@
+use core::tab_container::TabContent;
+use core::tab_container::TabContentType;
 use std::any::Any;
 use gpui::{div, App, Context, Entity, Focusable, FocusHandle, IntoElement, ParentElement, Styled, Window, AppContext, SharedString, AnyElement};
 use gpui_component::{v_flex, ActiveTheme, Size};
 use crate::object_detail::{ObjectDetailView, SelectedNode};
 use db::types::DbNodeType;
-use crate::tab_container::{TabContent, TabContentType};
 
 /// Panel that displays database object details based on tree selection
 /// This replaces the old tab-based approach with a dynamic detail view

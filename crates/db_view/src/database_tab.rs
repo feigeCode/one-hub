@@ -1,3 +1,5 @@
+use core::storage::StoredConnection;
+use core::tab_container::{TabContainer, TabItem,TabContent,TabContentType};
 use std::any::Any;
 
 use gpui::{
@@ -8,10 +10,9 @@ use gpui::prelude::FluentBuilder;
 use gpui_component::{h_flex, v_flex, ActiveTheme, IconName};
 use gpui_component::button::ButtonVariants;
 use gpui_component::resizable::{h_resizable, resizable_panel};
+use uuid::{Uuid};
 use crate::database_objects_tab::DatabaseObjectsPanel;
 use crate::db_tree_view::DbTreeView;
-use crate::storage::StoredConnection;
-use crate::tab_container::{TabContent, TabContentType, TabContainer, TabItem};
 
 // Event handler for database tree view events
 struct DatabaseEventHandler {
@@ -66,7 +67,7 @@ impl DatabaseEventHandler {
 
                     // Add to tab container
                     tab_container_clone.update(cx, |container, cx| {
-                        let tab_id = format!("query-{}-{}", database, uuid::Uuid::new_v4());
+                        let tab_id = format!("query-{}-{}", database, Uuid::new_v4());
                         let tab = TabItem::new(tab_id, sql_editor);
                         container.add_and_activate_tab(tab, cx);
                     });

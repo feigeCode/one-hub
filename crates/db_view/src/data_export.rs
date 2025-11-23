@@ -7,7 +7,7 @@
 //! - Excel (HTML table or Excel 2003 XML SpreadsheetML)
 //! - Word (RTF table)
 //!
-//! This module is standalone and not wired into `main.rs` by default.
+//! This module is standalone and not wired into `lib` by default.
 //! To use it later, add `mod data_export;` and call the functions below.
 
 use std::fs;

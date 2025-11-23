@@ -7,13 +7,9 @@ use gpui::{
     MouseButton, ParentElement, RenderOnce, StyleRefinement, Styled,
     UniformListScrollHandle, Window, Context, Render, px,
 };
-
-use gpui_component::{
-    scroll::{Scrollbar, ScrollbarState},
-    StyledExt,
-    tree::TreeItem,
-    IconName, h_flex,
-};
+use crate::{h_flex, IconName, StyledExt};
+use crate::scroll::{Scrollbar, ScrollbarState};
+use crate::tree::TreeItem;
 
 /// 创建一个支持右键菜单的树形视图
 ///

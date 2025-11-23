@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/assets", "crates/core", "crates/db", "crates/ui", "crates/mysql", "crates/postgresql", "crates/sqlite"]
+members = [".", "crates/assets", "crates/core", "crates/db", "crates/ui", "crates/mysql", "crates/postgresql", "crates/sqlite", "crates/db_view"]
 
 
 [package]
@@ -38,7 +38,10 @@ sqlx = { version = "0.8", features = ["runtime-tokio-native-tls", "mysql", "post
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
 assets = { path = "crates/assets" }
 db = { path = "crates/db" }
-
+db_view = { path = "crates/db_view" }
+core = { path = "crates/core" }
+dirs = "6.0"
+uuid = { version = "1.11", features = ["v4"] }
 [workspace.dependencies.windows]
 features = ["Wdk", "Wdk_System", "Wdk_System_SystemServices"]
 version = "0.58.0"
@@ -86,11 +89,12 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 rust-i18n = { workspace = true }
 lsp-types = { workspace = true }
 async-trait = { workspace = true }
-dirs = "6.0"
-uuid = { version = "1.11", features = ["v4"] }
+
+
 assets = { workspace = true }
 db = { workspace = true }
-
+db_view = { workspace = true }
+core.workspace = true
 [profile.release]
 opt-level = "s"
 lto = "fat"
