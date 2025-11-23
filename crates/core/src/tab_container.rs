@@ -3,6 +3,7 @@ use gpui::prelude::FluentBuilder;
 use gpui::StatefulInteractiveElement as _;
 use gpui::{div, px, AnyElement, App, AppContext, Context, InteractiveElement, IntoElement, MouseButton, ParentElement, Render, ScrollHandle, SharedString, Styled, Window};
 use gpui_component::{h_flex, v_flex, ActiveTheme, IconName, Size};
+use gpui_component::menu::{ContextMenuExt, PopupMenuItem};
 // ============================================================================
 // TabContent Trait - Strategy Pattern Interface
 // ============================================================================
@@ -326,6 +327,83 @@ impl TabContainer {
         }
     }
 
+    /// Close all tabs except the one at the given index
+    pub fn close_other_tabs(&mut self, keep_index: usize, cx: &mut Context<Self>) {
+        if keep_index >= self.tabs.len() {
+            return;
+        }
+
+        // Keep the tab at keep_index, remove all others
+        let kept_tab = self.tabs.remove(keep_index);
+        self.tabs.retain(|tab| !tab.content().closeable());
+        self.tabs.insert(0, kept_tab);
+        self.active_index = 0;
+
+        cx.notify();
+    }
+
+    /// Close all tabs
+    pub fn close_all_tabs(&mut self, cx: &mut Context<Self>) {
+        self.tabs.retain(|tab| !tab.content().closeable());
+
+        // Reset active index
+        if self.active_index >= self.tabs.len() && !self.tabs.is_empty() {
+            self.active_index = self.tabs.len() - 1;
+        } else if self.tabs.is_empty() {
+            self.active_index = 0;
+        }
+
+        cx.notify();
+    }
+
+    /// Close all tabs to the left of the given index
+    pub fn close_tabs_to_left(&mut self, index: usize, cx: &mut Context<Self>) {
+        if index == 0 || index >= self.tabs.len() {
+            return;
+        }
+
+        // Remove closeable tabs from index-1 down to 0
+        let mut i = 0;
+        let mut removed_count = 0;
+        while i < index {
+            if self.tabs[i].content().closeable() {
+                self.tabs.remove(i);
+                removed_count += 1;
+            }
+            i += 1;
+        }
+
+        // Adjust active index
+        if self.active_index >= removed_count {
+            self.active_index -= removed_count;
+        }
+
+        cx.notify();
+    }
+
+    /// Close all tabs to the right of the given index
+    pub fn close_tabs_to_right(&mut self, index: usize, cx: &mut Context<Self>) {
+        if index >= self.tabs.len() - 1 {
+            return;
+        }
+
+        // Remove closeable tabs from index+1 to end
+        let mut i = index + 1;
+        while i < self.tabs.len() {
+            if self.tabs[i].content().closeable() {
+                self.tabs.remove(i);
+            }
+            i += 1;
+        }
+
+        // Adjust active index if it was beyond the removed tabs
+        if self.active_index > index && self.active_index >= self.tabs.len() {
+            self.active_index = self.tabs.len() - 1;
+        }
+
+        cx.notify();
+    }
+
     /// Close a tab by ID
     pub fn close_tab_by_id(&mut self, id: &str, cx: &mut Context<Self>) {
         if let Some(index) = self.tabs.iter().position(|t| t.id() == id) {
@@ -576,7 +654,47 @@ impl TabContainer {
                                         })
                                         .child("×")
                                 )
-                            })
+                            }).context_menu(move |menu, window, cx| {
+                            let view_for_menu = view_clone.clone();
+                            let tab_count = view_for_menu.read(cx).tabs.len();
+                            let has_tabs_left = idx > 0;
+                            let has_tabs_right = idx < tab_count - 1;
+                            let closeable = view_for_menu.read(cx).tabs.get(idx)
+                                .map(|tab| tab.content().closeable())
+                                .unwrap_or(false);
+
+                            menu
+                                // Close current tab
+                                .item(PopupMenuItem::new("Close")
+                                    .disabled(!closeable)
+                                    .on_click(window.listener_for(&view_for_menu, move |this, _, _, cx| {
+                                        this.close_tab(idx, cx);
+                                    })))
+                                // Close all tabs
+                                .item(PopupMenuItem::new("Close All")
+                                    .on_click(window.listener_for(&view_for_menu, move |this, _, _, cx| {
+                                        this.close_all_tabs(cx);
+                                    })))
+                                // Close other tabs
+                                .item(PopupMenuItem::new("Close Others")
+                                    .disabled(tab_count <= 1)
+                                    .on_click(window.listener_for(&view_for_menu, move |this, _, _, cx| {
+                                        this.close_other_tabs(idx, cx);
+                                    })))
+                                // Close tabs to the left
+                                .item(PopupMenuItem::new("Close Tabs To The Left")
+                                    .disabled(!has_tabs_left)
+                                    .on_click(window.listener_for(&view_for_menu, move |this, _, _, cx| {
+                                        this.close_tabs_to_left(idx, cx);
+                                    })))
+                                // Close tabs to the right
+                                .item(PopupMenuItem::new("Close Tabs To The Right")
+                                    .disabled(!has_tabs_right)
+                                    .on_click(window.listener_for(&view_for_menu, move |this, _, _, cx| {
+                                        this.close_tabs_to_right(idx, cx);
+                                    })))
+
+                        })
                     }))
             )
     }
