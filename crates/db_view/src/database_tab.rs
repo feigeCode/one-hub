@@ -1,18 +1,18 @@
 use core::storage::StoredConnection;
-use core::tab_container::{TabContainer, TabItem,TabContent,TabContentType};
+use core::tab_container::{TabContainer, TabContent, TabContentType, TabItem};
 use std::any::Any;
 
+use crate::database_objects_tab::DatabaseObjectsPanel;
+use crate::db_tree_view::DbTreeView;
+use gpui::prelude::FluentBuilder;
 use gpui::{
     div, px, AnyElement, App, AppContext, Context, Entity, FontWeight,
     Hsla, IntoElement, ParentElement, SharedString, Styled, Subscription, Window,
 };
-use gpui::prelude::FluentBuilder;
-use gpui_component::{h_flex, v_flex, ActiveTheme, IconName};
 use gpui_component::button::ButtonVariants;
 use gpui_component::resizable::{h_resizable, resizable_panel};
-use uuid::{Uuid};
-use crate::database_objects_tab::DatabaseObjectsPanel;
-use crate::db_tree_view::DbTreeView;
+use gpui_component::{h_flex, v_flex, ActiveTheme, IconName};
+use uuid::Uuid;
 
 // Event handler for database tree view events
 struct DatabaseEventHandler {
@@ -75,61 +75,143 @@ impl DatabaseEventHandler {
                 DbTreeViewEvent::OpenTableData { database, table } => {
                     use crate::table_data_tab::TableDataTabContent;
 
-                    // Create table data panel
+                    let tab_id = format!("table-data-{}.{}", database, table);
+                    let database_clone = database.clone();
+                    let table_clone = table.clone();
                     let config = conn_info_clone.to_db_connection();
-                    let table_data = TableDataTabContent::new(
-                        database.clone(),
-                        table.clone(),
-                        config,
-                        window,
-                        cx,
-                    );
 
-                    // Add to tab container
+                    // Lazy load: only create tab content if tab doesn't exist
                     tab_container_clone.update(cx, |container, cx| {
-                        let tab_id = format!("table-data-{}.{}", database, table);
-                        let tab = TabItem::new(tab_id, table_data);
-                        container.add_and_activate_tab(tab, cx);
+                        container.activate_or_add_tab_lazy(
+                            tab_id.clone(),
+                            |window, cx| {
+                                let table_data = TableDataTabContent::new(
+                                    database_clone,
+                                    table_clone,
+                                    config,
+                                    window,
+                                    cx,
+                                );
+                                TabItem::new(tab_id, table_data)
+                            },
+                            window,
+                            cx,
+                        );
                     });
                 }
                 DbTreeViewEvent::OpenViewData { database, view } => {
                     use crate::table_data_tab::TableDataTabContent;
 
-                    // Create view data panel (reuse TableDataTabContent)
+                    let tab_id = format!("view-data-{}.{}", database, view);
+                    let database_clone = database.clone();
+                    let view_clone = view.clone();
                     let config = conn_info_clone.to_db_connection();
-                    let view_data = TableDataTabContent::new(
-                        database.clone(),
-                        view.clone(),
-                        config,
-                        window,
-                        cx,
-                    );
 
-                    // Add to tab container
+                    // Lazy load: only create tab content if tab doesn't exist
                     tab_container_clone.update(cx, |container, cx| {
-                        let tab_id = format!("view-data-{}.{}", database, view);
-                        let tab = TabItem::new(tab_id, view_data);
-                        container.add_and_activate_tab(tab, cx);
+                        container.activate_or_add_tab_lazy(
+                            tab_id.clone(),
+                            |window, cx| {
+                                let view_data = TableDataTabContent::new(
+                                    database_clone,
+                                    view_clone,
+                                    config,
+                                    window,
+                                    cx,
+                                );
+                                TabItem::new(tab_id, view_data)
+                            },
+                            window,
+                            cx,
+                        );
                     });
                 }
                 DbTreeViewEvent::OpenTableStructure { database, table } => {
                     use crate::table_structure_tab::TableStructureTabContent;
 
-                    // Create table structure panel
+                    let tab_id = format!("table-structure-{}.{}", database, table);
+                    let database_clone = database.clone();
+                    let table_clone = table.clone();
                     let config = conn_info_clone.to_db_connection();
-                    let table_structure = TableStructureTabContent::new(
-                        database.clone(),
-                        table.clone(),
+
+                    // Lazy load: only create tab content if tab doesn't exist
+                    tab_container_clone.update(cx, |container, cx| {
+                        container.activate_or_add_tab_lazy(
+                            tab_id.clone(),
+                            |window, cx| {
+                                let table_structure = TableStructureTabContent::new(
+                                    database_clone,
+                                    table_clone,
+                                    config,
+                                    window,
+                                    cx,
+                                );
+                                TabItem::new(tab_id, table_structure)
+                            },
+                            window,
+                            cx,
+                        );
+                    });
+                }
+                DbTreeViewEvent::ImportData { database, table: _ } => {
+                    use crate::data_import_view::DataImportView;
+                    use gpui_component::WindowExt;
+
+                    eprintln!("Opening import dialog for database: {}", database);
+                    
+                    // Create data import view
+                    let config = conn_info_clone.to_db_connection();
+                    let import_view = DataImportView::new(
                         config,
+                        database.clone(),
+                        window,
+                        cx,
+                    );
+                    
+                    eprintln!("Import view created, opening dialog...");
+                    
+                    // Open as dialog
+                    window.open_dialog(cx, move |dialog, _window, _cx| {
+                        eprintln!("Dialog builder called");
+                        dialog
+                            .title("Import Data")
+                            .child(import_view.clone())
+                            .width(px(800.0))
+                            .on_cancel(|_, _window, _cx| true)
+                    });
+                    
+                    eprintln!("Dialog opened");
+                }
+                DbTreeViewEvent::ExportData { database, tables } => {
+                    use crate::data_export_view::DataExportView;
+                    use gpui_component::WindowExt;
+
+                    // Create data export view
+                    let config = conn_info_clone.to_db_connection();
+                    let export_view = DataExportView::new(
+                        config,
+                        database.clone(),
                         window,
                         cx,
                     );
 
-                    // Add to tab container
-                    tab_container_clone.update(cx, |container, cx| {
-                        let tab_id = format!("table-structure-{}.{}", database, table);
-                        let tab = TabItem::new(tab_id, table_structure);
-                        container.add_and_activate_tab(tab, cx);
+                    // Pre-fill tables if provided
+                    if !tables.is_empty() {
+                        let tables_str = tables.join(", ");
+                        export_view.update(cx, |view, cx| {
+                            view.tables.update(cx, |state, cx| {
+                                state.set_value(tables_str, window, cx);
+                            });
+                        });
+                    }
+                    
+                    // Open as dialog
+                    window.open_dialog(cx, move |dialog, _window, _cx| {
+                        dialog
+                            .title("Export Data")
+                            .child(export_view.clone())
+                            .width(px(800.0))
+                            .on_cancel(|_, _window, _cx| true)
                     });
                 }
             }
@@ -414,7 +496,7 @@ impl DatabaseTabContent {
     }
 
     fn render_toolbar(&self, _: &mut Window, cx: &mut App) -> impl IntoElement {
-        use gpui_component::{button::Button, Sizable};
+        use gpui_component::button::Button;
 
         h_flex()
             .w_full()
@@ -428,21 +510,21 @@ impl DatabaseTabContent {
             .child(
                 Button::new("refresh-tree")
                     .icon(IconName::Loader)
-                    .small()
+                    .child("刷新")
                     .ghost()
                     .tooltip("刷新")
             )
             .child(
                 Button::new("new-query")
                     .icon(IconName::File)
-                    .small()
+                    .child("新建查询")
                     .ghost()
                     .tooltip("新建查询")
             )
             .child(
                 Button::new("new-table")
                     .icon(IconName::TABLE)
-                    .small()
+                    .child("新建表")
                     .ghost()
                     .tooltip("新建表")
             )

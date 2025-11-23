@@ -2,6 +2,7 @@ use std::any::Any;
 use anyhow::Error;
 use gpui::{div, px, AnyElement, App, AppContext, Context, Entity, FontWeight, Hsla, InteractiveElement, IntoElement, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Window};
 use gpui::prelude::FluentBuilder;
+use rust_i18n::t;
 use gpui_component::{button::Button, h_flex, v_flex, ActiveTheme, IconName, Selectable, ThemeMode};
 use core::connection_store::{ConnectionStore};
 use core::storage::{StoredConnection, ConnectionType};
@@ -131,17 +132,9 @@ impl HomePage {
 
     pub fn add_settings_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.tab_container.update(cx, |tc, cx| {
-            // 检查设置标签是否已存在
-            let settings_type = TabContentType::Custom("settings".to_string());
-            if !tc.has_tab_type(&settings_type) {
-                let settings_tab = TabItem::new("settings", SettingsTabContent::new());
-                tc.add_and_activate_tab(settings_tab, cx);
-            } else {
-                // 如果已存在，则激活它
-                tc.activate_or_create(&settings_type, || {
-                    TabItem::new("settings", SettingsTabContent::new())
-                }, window, cx);
-            }
+            tc.activate_or_add_tab_lazy("settings", |_, _| {
+                TabItem::new("settings", SettingsTabContent::new())
+            }, window, cx);
         });
     }
 

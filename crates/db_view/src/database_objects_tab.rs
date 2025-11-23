@@ -64,6 +64,9 @@ impl TabContent for DatabaseObjectsPanel {
         SharedString::from("对象")
     }
 
+    fn closeable(&self) -> bool {
+        false
+    }
     fn render_content(&self, _window: &mut Window, cx: &mut App) -> AnyElement {
         v_flex()
             .size_full()

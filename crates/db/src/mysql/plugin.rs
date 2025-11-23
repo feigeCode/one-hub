@@ -1,12 +1,11 @@
-use anyhow::Result;
-use sqlx::mysql::MySqlRow;
-use std::collections::HashMap;
-use sqlx::Row;
 use crate::connection::{DbConnection, DbError};
-use crate::types::*;
-use crate::plugin::DatabasePlugin;
+use crate::executor::{ExecOptions, ExecResult, SqlResult};
 use crate::mysql::connection::MysqlDbConnection;
-use crate::executor::{ExecOptions, SqlResult, ExecResult};
+use crate::plugin::DatabasePlugin;
+use crate::types::*;
+use anyhow::Result;
+use sqlx::Row;
+use std::collections::HashMap;
 
 /// MySQL database plugin implementation (stateless)
 pub struct MySqlPlugin;

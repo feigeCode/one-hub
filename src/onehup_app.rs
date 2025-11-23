@@ -1,9 +1,9 @@
 use crate::home::HomeTabContent;
 use core::tab_container::{TabContainer, TabItem};
 use core::themes;
-use gpui::{div, px, App, AppContext, Context, Entity, IntoElement, KeyBinding, ParentElement, Render, Styled, Window};
+use gpui::{div, px, App, AppContext, Context, Entity, Hsla, IntoElement, KeyBinding, ParentElement, Render, Styled, Window};
 use gpui_component::dock::{ClosePanel, ToggleZoom};
-use gpui_component::ActiveTheme;
+use gpui_component::{ActiveTheme, Root};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use core::connection_store::ConnectionStore;
@@ -40,14 +40,16 @@ impl OneHupApp {
 
         // 创建标签容器，根据平台设置 padding
         let tab_container = cx.new(|cx| {
-            let mut container = TabContainer::new(window, cx);
+            let mut container = TabContainer::new(window, cx)
+                .with_inactive_tab_bg_color(Some(gpui::rgb(0x3a3a3a).into()))
+                .with_tab_icon_color(Some(gpui::rgb(0xffffff).into()));
             
             // macOS: 为红黄绿按钮留出空间并垂直居中
             #[cfg(target_os = "macos")]
             {
                 container = container
                     .with_left_padding(px(80.0))
-                    .with_top_padding(px(4.0));
+                    .with_top_padding(px(4.0))
             }
             
             container
@@ -66,10 +68,16 @@ impl OneHupApp {
 }
 
 impl Render for OneHupApp {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let sheet_layer = Root::render_sheet_layer(window, cx);
+        let dialog_layer = Root::render_dialog_layer(window, cx);
+        let notification_layer = Root::render_notification_layer(window, cx);
         div()
             .size_full()
             .bg(cx.theme().background)
             .child(self.tab_container.clone())
+            .children(sheet_layer)
+            .children(dialog_layer)
+            .children(notification_layer)
     }
 }

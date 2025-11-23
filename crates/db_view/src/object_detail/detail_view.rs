@@ -37,7 +37,9 @@ impl SelectedNode {
                         name: parts[1].to_string(),
                     }
                 } else {
-                    SelectedNode::None
+                    SelectedNode::Database {
+                        name: node_id.to_string(),
+                    }
                 }
             }
             DbNodeType::TablesFolder => {

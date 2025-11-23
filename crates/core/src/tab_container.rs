@@ -141,10 +141,14 @@ pub struct TabContainer {
     active_tab_bg_color: Option<gpui::Hsla>,
     /// Optional background color for inactive tab hover state (defaults to dark theme)
     inactive_tab_hover_color: Option<gpui::Hsla>,
+    /// Optional background color for inactive tabs (defaults to dark theme)
+    inactive_tab_bg_color: Option<gpui::Hsla>,
     /// Optional text color for tabs (defaults to white)
     tab_text_color: Option<gpui::Hsla>,
     /// Optional close button color (defaults to gray)
     tab_close_button_color: Option<gpui::Hsla>,
+    /// Optional icon color for tabs (defaults to white)
+    tab_icon_color: Option<gpui::Hsla>,
     /// Optional left padding for macOS traffic lights (defaults to 0)
     left_padding: Option<gpui::Pixels>,
     /// Optional top padding for vertical centering (defaults to 0)
@@ -158,18 +162,29 @@ impl TabContainer {
         Self {
             tabs: Vec::new(),
             active_index: 0,
-            size: Size::Medium,
+            size: Size::Large,
             show_menu: false,
             tab_bar_bg_color: None,
             tab_bar_border_color: None,
             active_tab_bg_color: None,
             inactive_tab_hover_color: None,
+            inactive_tab_bg_color: None,
             tab_text_color: None,
             tab_close_button_color: None,
+            tab_icon_color: None,
             left_padding: None,
             top_padding: None,
             tab_bar_scroll_handle: ScrollHandle::new(),
         }
+    }
+
+    pub fn with_tab_icon_color(mut self, color: impl Into<Option<gpui::Hsla>>) -> Self {
+        self.tab_icon_color = color.into();
+        self
+    }
+    pub fn with_inactive_tab_bg_color(mut self, color: impl Into<Option<gpui::Hsla>>) -> Self {
+        self.inactive_tab_bg_color = color.into();
+         self
     }
 
     /// Set custom tab bar colors (background and border)
@@ -269,7 +284,32 @@ impl TabContainer {
     pub fn add_and_activate_tab(&mut self, tab: TabItem, cx: &mut Context<Self>) {
         self.tabs.push(tab);
         self.active_index = self.tabs.len() - 1;
+        self.tab_bar_scroll_handle.scroll_to_item(self.tabs.len() - 1);
         cx.notify();
+    }
+
+    /// Activate existing tab by ID, or create and activate if not exists (lazy loading)
+    /// The create_fn closure is only called if the tab doesn't exist
+    /// The closure receives window and cx to avoid borrowing issues
+    pub fn activate_or_add_tab_lazy<F>(&mut self, tab_id: impl Into<String>, create_fn: F, window: &mut Window, cx: &mut Context<Self>)
+    where
+        F: FnOnce(&mut Window, &mut Context<Self>) -> TabItem,
+    {
+        let tab_id = tab_id.into();
+
+        // Check if tab already exists
+        if let Some(index) = self.tabs.iter().position(|t| t.id() == tab_id) {
+            // Tab exists, activate it without triggering callbacks
+            if index < self.tabs.len() {
+                self.tab_bar_scroll_handle.scroll_to_item(index);
+                self.active_index = index;
+                cx.notify();
+            }
+        } else {
+            // Tab doesn't exist, create and activate it
+            let tab = create_fn(window, cx);
+            self.add_and_activate_tab(tab, cx);
+        }
     }
 
     /// Close a tab by index
@@ -338,28 +378,6 @@ impl TabContainer {
         self.find_tab_by_type(content_type).is_some()
     }
 
-    /// Activate existing tab or create new one
-    pub fn activate_or_create<F>(
-        &mut self,
-        content_type: &TabContentType,
-        create_fn: F,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) where
-        F: FnOnce() -> TabItem,
-    {
-        if let Some(index) = self
-            .tabs
-            .iter()
-            .position(|t| &t.content().content_type() == content_type)
-        {
-            self.set_active_index(index, window, cx);
-        } else {
-            let tab = create_fn();
-            self.add_and_activate_tab(tab, cx);
-        }
-    }
-
     /// Set tab bar size
     pub fn set_size(&mut self, size: Size, cx: &mut Context<Self>) {
         self.size = size;
@@ -412,10 +430,10 @@ impl TabContainer {
     fn size_to_pixels(&self, size: Size) -> gpui::Pixels {
         match size {
             Size::Size(pixels) => pixels,  // 自定义像素值
-            Size::XSmall => px(100.0),
-            Size::Small => px(140.0),
-            Size::Medium => px(180.0),
-            Size::Large => px(220.0),
+            Size::XSmall => px(60.0),
+            Size::Small => px(100.0),
+            Size::Medium => px(140.0),
+            Size::Large => px(180.0),
         }
     }
 
@@ -434,14 +452,15 @@ impl TabContainer {
         let view = cx.entity();
 
         // 使用自定义颜色或默认深色标签栏
-        let bg_color = self.tab_bar_bg_color.unwrap_or_else(|| gpui::rgb(0x2d2d2d).into());
+        let bg_color = self.tab_bar_bg_color.unwrap_or_else(|| gpui::rgb(0x2b2b2b).into());
         let border_color = self.tab_bar_border_color.unwrap_or_else(|| gpui::rgb(0x1e1e1e).into());
-        let active_tab_color = self.active_tab_bg_color.unwrap_or_else(|| gpui::rgb(0x4a4a4a).into());
+        let active_tab_color = self.active_tab_bg_color.unwrap_or_else(|| gpui::rgb(0x555555).into());
         let hover_tab_color = self.inactive_tab_hover_color.unwrap_or_else(|| gpui::rgb(0x3a3a3a).into());
+        let inactive_tab_color = self.inactive_tab_bg_color.unwrap_or_else(|| gpui::rgb(0xffffff).into());
         let text_color = self.tab_text_color.unwrap_or_else(|| gpui::white().into());
         let close_btn_color = self.tab_close_button_color.unwrap_or_else(|| gpui::rgb(0xaaaaaa).into());
         let drag_border_color = cx.theme().drag_border;
-
+        let icon_color = self.tab_icon_color.unwrap_or_else(|| gpui::rgb(0xaaaaaa).into());
         let active_index = self.active_index;
 
         h_flex()
@@ -484,7 +503,7 @@ impl TabContainer {
                             .rounded(px(6.0))
                             .cursor_grab()
                             .when(is_active, |el| el.bg(active_tab_color))
-                            .when(!is_active, |el| el.hover(move |style| style.bg(hover_tab_color)))
+                            .when(!is_active, |el| el.hover(move |style| style.bg(hover_tab_color)).bg(inactive_tab_color))
                             .on_drag(
                                 DragTab::new(idx, title.clone()),
                                 |drag, _, _, cx| {
@@ -517,6 +536,7 @@ impl TabContainer {
                                         .flex_shrink_0()
                                         .flex()
                                         .items_center()
+                                        .text_color(icon_color)
                                         .child(icon)
                                 )
                             })

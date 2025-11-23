@@ -29,6 +29,10 @@ pub enum DbTreeViewEvent {
     CreateNewQuery { database: String },
     /// 节点被选中（用于更新 objects panel）
     NodeSelected { node_id: String },
+    /// 导入数据
+    ImportData { database: String, table: Option<String> },
+    /// 导出数据
+    ExportData { database: String, tables: Vec<String> },
 }
 
 // ============================================================================
@@ -550,17 +554,36 @@ impl Render for DbTreeView {
                                                             // 根据节点类型添加不同的菜单项
                                                             match node.node_type {
                                                                 DbNodeType::Database => {
-                                                                    let view_ref2 = view_clone.clone();
                                                                     let db_name = node.name.clone();
                                                                     let db_name_for_query = db_name.clone();
+                                                                    let db_name_for_import = db_name.clone();
+                                                                    let db_name_for_export = db_name.clone();
 
                                                                     menu = menu
                                                                         .item(
                                                                             PopupMenuItem::new("New Query")
                                                                                 .on_click(window.listener_for(&view_clone, move |_this, _, _, cx| {
-                                                                                    eprintln!("Creating new query for database: {}", db_name_for_query);
                                                                                     cx.emit(DbTreeViewEvent::CreateNewQuery {
                                                                                         database: db_name_for_query.clone(),
+                                                                                    });
+                                                                                }))
+                                                                        )
+                                                                        .separator()
+                                                                        .item(
+                                                                            PopupMenuItem::new("Import Data")
+                                                                                .on_click(window.listener_for(&view_clone, move |_this, _, _, cx| {
+                                                                                    cx.emit(DbTreeViewEvent::ImportData {
+                                                                                        database: db_name_for_import.clone(),
+                                                                                        table: None,
+                                                                                    });
+                                                                                }))
+                                                                        )
+                                                                        .item(
+                                                                            PopupMenuItem::new("Export Database")
+                                                                                .on_click(window.listener_for(&view_clone, move |_this, _, _, cx| {
+                                                                                    cx.emit(DbTreeViewEvent::ExportData {
+                                                                                        database: db_name_for_export.clone(),
+                                                                                        tables: vec![],
                                                                                     });
                                                                                 }))
                                                                         )
@@ -569,19 +592,40 @@ impl Render for DbTreeView {
                                                                 DbNodeType::Table => {
                                                                     let table_name = node.name.clone();
                                                                     let database_name = node.parent_context.clone().unwrap_or_else(|| "unknown".to_string());
+                                                                    let table_for_import = table_name.clone();
+                                                                    let db_for_import = database_name.clone();
+                                                                    let table_for_export = table_name.clone();
+                                                                    let db_for_export = database_name.clone();
 
                                                                     menu = menu
                                                                         .item(PopupMenuItem::new("View Table Data"))
-                                                                        .item(PopupMenuItem::new("Export Table"))
                                                                         .item(
                                                                             PopupMenuItem::new("Edit Table")
                                                                             .on_click(window.listener_for(&view_clone, move |_this, _, _, cx| {
-                                                                                eprintln!("Opening table structure tab: {}.{}", database_name, table_name);
                                                                                 cx.emit(DbTreeViewEvent::OpenTableStructure {
                                                                                     database: database_name.clone(),
                                                                                     table: table_name.clone(),
                                                                                 });
                                                                             }))
+                                                                        )
+                                                                        .separator()
+                                                                        .item(
+                                                                            PopupMenuItem::new("Import to Table")
+                                                                                .on_click(window.listener_for(&view_clone, move |_this, _, _, cx| {
+                                                                                    cx.emit(DbTreeViewEvent::ImportData {
+                                                                                        database: db_for_import.clone(),
+                                                                                        table: Some(table_for_import.clone()),
+                                                                                    });
+                                                                                }))
+                                                                        )
+                                                                        .item(
+                                                                            PopupMenuItem::new("Export Table")
+                                                                                .on_click(window.listener_for(&view_clone, move |_this, _, _, cx| {
+                                                                                    cx.emit(DbTreeViewEvent::ExportData {
+                                                                                        database: db_for_export.clone(),
+                                                                                        tables: vec![table_for_export.clone()],
+                                                                                    });
+                                                                                }))
                                                                         )
                                                                         .separator();
                                                                 }
