@@ -162,6 +162,18 @@ pub struct IndexInfo {
     pub index_type: Option<String>,
 }
 
+/// Table information with description/metadata
+#[derive(Debug, Clone)]
+pub struct TableInfo {
+    pub name: String,
+    pub comment: Option<String>,
+    pub engine: Option<String>,
+    pub row_count: Option<i64>,
+    pub create_time: Option<String>,
+    pub charset: Option<String>,
+    pub collation: Option<String>,
+}
+
 /// View information
 #[derive(Debug, Clone)]
 pub struct ViewInfo {

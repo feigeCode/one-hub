@@ -261,19 +261,26 @@ impl SqlEditorTabContent {
 
             // Add tables to schema
             let table_items: Vec<(String, String)> = tables.iter()
-                .map(|t| (t.clone(), format!("Table: {}", t)))
+                .map(|t| {
+                    let description = if let Some(comment) = &t.comment {
+                        format!("Table: {} - {}", t.name, comment)
+                    } else {
+                        format!("Table: {}", t.name)
+                    };
+                    (t.name.clone(), description)
+                })
                 .collect();
             schema = schema.with_tables(table_items);
 
             // Load columns for each table
             for table in &tables {
-                if let Ok(columns) = plugin.list_columns(&**conn, &db, table).await {
+                if let Ok(columns) = plugin.list_columns(&**conn, &db, &table.name).await {
                     let column_items: Vec<(String, String)> = columns.iter()
                         .map(|c| (c.name.clone(), format!("{} - {}",
 c.data_type,
                             c.comment.as_ref().unwrap_or(&String::new()))))
                         .collect();
-                    schema = schema.with_table_columns(table, column_items);
+                    schema = schema.with_table_columns(&table.name, column_items);
                 }
             }
 

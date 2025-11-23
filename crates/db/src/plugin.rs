@@ -30,7 +30,7 @@ pub trait DatabasePlugin: Send + Sync {
     fn generate_alter_database_sql(&self, request: &AlterDatabaseRequest) -> Result<String>;
 
     // === Table Operations ===
-    async fn list_tables(&self, connection: &dyn DbConnection, database: &str) -> Result<Vec<String>>;
+    async fn list_tables(&self, connection: &dyn DbConnection, database: &str) -> Result<Vec<TableInfo>>;
     async fn list_columns(&self, connection: &dyn DbConnection, database: &str, table: &str) -> Result<Vec<ColumnInfo>>;
     async fn list_indexes(&self, connection: &dyn DbConnection, database: &str, table: &str) -> Result<Vec<IndexInfo>>;
     
@@ -122,15 +122,24 @@ pub trait DatabasePlugin: Send + Sync {
         if table_count > 0 {
             let children: Vec<DbNode> = tables
                 .into_iter()
-                .map(|table| {
-                    DbNode::new(
-                        format!("{}:table_folder:{}", id, table),
-                        table.clone(),
+                .map(|table_info| {
+                    let mut node = DbNode::new(
+                        format!("{}:table_folder:{}", id, table_info.name),
+                        table_info.name.clone(),
                         DbNodeType::Table,
                     )
                     .with_children_flag(true)
                     .with_parent_context(format!("{}:table_folder", id))
-                    .with_metadata(database)
+                    .with_metadata(database);
+
+                    // Add comment as additional metadata if available
+                    if let Some(comment) = table_info.comment {
+                        if !comment.is_empty() {
+                            node = node.with_metadata(format!("{} - {}", database, comment));
+                        }
+                    }
+
+                    node
                 })
                 .collect();
             table_folder.children = children;

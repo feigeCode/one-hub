@@ -1,53 +1,17 @@
 use std::any::Any;
 
 use gpui::{
-    div, px, AnyElement, App, AppContext, Context, Element, Entity, FontWeight,
-    Hsla, IntoElement, InteractiveElement, ParentElement, Pixels, SharedString, Styled, Subscription, Window,
+    div, px, AnyElement, App, AppContext, Context, Entity, FontWeight,
+    Hsla, IntoElement, ParentElement, SharedString, Styled, Subscription, Window,
 };
 use gpui::prelude::FluentBuilder;
-use gpui_component::{h_flex, v_flex, ActiveTheme, IconName, Size};
+use gpui_component::{h_flex, v_flex, ActiveTheme, IconName};
 use gpui_component::button::ButtonVariants;
 use gpui_component::resizable::{h_resizable, resizable_panel};
-use crate::database_objects_panel::DatabaseObjectsPanel;
+use crate::database_objects_tab::DatabaseObjectsPanel;
 use crate::db_tree_view::DbTreeView;
 use crate::storage::StoredConnection;
 use crate::tab_container::{TabContent, TabContentType, TabContainer, TabItem};
-
-// Wrapper to make DatabaseObjectsPanel compatible with TabContent
-#[derive(Clone)]
-struct ObjectsPanelWrapper {
-    panel: Entity<DatabaseObjectsPanel>,
-}
-
-impl TabContent for ObjectsPanelWrapper {
-    fn title(&self) -> SharedString {
-        "Objects".into()
-    }
-
-    fn icon(&self) -> Option<IconName> {
-        None
-    }
-
-    fn closeable(&self) -> bool {
-        false
-    }
-
-    fn render_content(&self, _window: &mut Window, _cx: &mut App) -> AnyElement {
-        self.panel.clone().into_any_element()
-    }
-
-    fn content_type(&self) -> TabContentType {
-        TabContentType::Custom("objects-panel".to_string())
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn width_size(&self) -> Option<Size> {
-        Some(Size::XSmall)
-    }
-}
 
 // Event handler for database tree view events
 struct DatabaseEventHandler {
@@ -73,7 +37,6 @@ impl DatabaseEventHandler {
         let tree_subscription = cx.subscribe_in(db_tree_view, window, move |_handler, _tree, event, window, cx| {
             match event {
                 DbTreeViewEvent::NodeSelected { node_id } => {
-                    use db::DbNodeType;
                     
                     // 先从 tree 中提取节点信息
                     let node_info = tree_view_clone.update(cx, |tree, _cx| {
@@ -82,64 +45,10 @@ impl DatabaseEventHandler {
                     
                     // 然后根据节点类型更新 objects panel
                     if let Some(node) = node_info {
-                        match node.node_type {
-                            DbNodeType::Database => {
-                                let db_name = node.name.clone();
-                                let config = conn_info_clone.to_db_connection();
-                                objects_panel_clone.update(cx, |panel, cx| {
-                                    panel.set_database(db_name, config, cx);
-                                });
-                            }
-                            DbNodeType::TablesFolder => {
-                                if let Some(db_name) = node.parent_context.as_ref() {
-                                    let config = conn_info_clone.to_db_connection();
-                                    objects_panel_clone.update(cx, |panel, cx| {
-                                        panel.set_database(db_name.clone(), config, cx);
-                                        panel.active_tab.update(cx, |tab, cx| {
-                                            *tab = 0;
-                                            cx.notify();
-                                        });
-                                    });
-                                }
-                            }
-                            DbNodeType::ViewsFolder => {
-                                if let Some(db_name) = node.parent_context.as_ref() {
-                                    let config = conn_info_clone.to_db_connection();
-                                    objects_panel_clone.update(cx, |panel, cx| {
-                                        panel.set_database(db_name.clone(), config, cx);
-                                        panel.active_tab.update(cx, |tab, cx| {
-                                            *tab = 1;
-                                            cx.notify();
-                                        });
-                                    });
-                                }
-                            }
-                            DbNodeType::FunctionsFolder => {
-                                if let Some(db_name) = node.parent_context.as_ref() {
-                                    let config = conn_info_clone.to_db_connection();
-                                    objects_panel_clone.update(cx, |panel, cx| {
-                                        panel.set_database(db_name.clone(), config, cx);
-                                        panel.active_tab.update(cx, |tab, cx| {
-                                            *tab = 2;
-                                            cx.notify();
-                                        });
-                                    });
-                                }
-                            }
-                            DbNodeType::ProceduresFolder => {
-                                if let Some(db_name) = node.parent_context.as_ref() {
-                                    let config = conn_info_clone.to_db_connection();
-                                    objects_panel_clone.update(cx, |panel, cx| {
-                                        panel.set_database(db_name.clone(), config, cx);
-                                        panel.active_tab.update(cx, |tab, cx| {
-                                            *tab = 3;
-                                            cx.notify();
-                                        });
-                                    });
-                                }
-                            }
-                            _ => {}
-                        }
+                        let config = conn_info_clone.to_db_connection();
+                        objects_panel_clone.update(cx, |panel, cx| {
+                            panel.handle_node_selected(node_id.clone(), node.node_type, config, cx);
+                        });
                     }
                 }
                 DbTreeViewEvent::CreateNewQuery { database } => {
@@ -270,15 +179,12 @@ impl DatabaseTabContent {
         let objects_panel = cx.new(|cx| {
             DatabaseObjectsPanel::new(window, cx)
         });
-
-        // Wrap objects panel in a TabContent wrapper
-        let objects_panel_wrapper = ObjectsPanelWrapper {
-            panel: objects_panel.clone(),
-        };
+        
 
         // Add objects panel to tab container
         tab_container.update(cx, |container, cx| {
-            let tab = TabItem::new("objects-panel", objects_panel_wrapper);
+            let panel_content = objects_panel.read(cx).clone();
+            let tab = TabItem::new("objects-panel", panel_content);
             container.add_and_activate_tab(tab, cx);
         });
 
@@ -370,7 +276,12 @@ impl DatabaseTabContent {
                         // Load objects for first database
                         if let Some(db) = first_database {
                             objects_panel.update(cx, |panel, cx| {
-                                panel.set_database(db, config.clone(), cx);
+                                panel.handle_node_selected(
+                                    db.clone(),
+                                    db::types::DbNodeType::Database,
+                                    config.clone(),
+                                    cx
+                                );
                             });
                         }
                     })

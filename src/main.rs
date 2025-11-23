@@ -11,7 +11,8 @@ mod table_structure_tab;
 mod context_menu_tree;
 mod storage;
 mod connection_store;
-mod database_objects_panel;
+mod database_objects_tab;
+mod object_detail;
 
 mod themes;
 mod onehup_app;

@@ -80,16 +80,49 @@ impl DatabasePlugin for MySqlPlugin {
 
     // === Table Operations ===
 
-    async fn list_tables(&self, connection: &dyn DbConnection, database: &str) -> Result<Vec<String>> {
-        let sql = format!("SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = '{}' AND TABLE_TYPE = 'BASE TABLE' ORDER BY TABLE_NAME", database);
+    async fn list_tables(&self, connection: &dyn DbConnection, database: &str) -> Result<Vec<TableInfo>> {
+        // Query to get all tables with their description/metadata
+        let sql = format!(
+            "SELECT \
+                TABLE_NAME, \
+                TABLE_COMMENT, \
+                ENGINE, \
+                TABLE_ROWS, \
+                CREATE_TIME, \
+                TABLE_COLLATION \
+             FROM INFORMATION_SCHEMA.TABLES \
+             WHERE TABLE_SCHEMA = '{}' AND TABLE_TYPE = 'BASE TABLE' \
+             ORDER BY TABLE_NAME",
+            database
+        );
+
         let result = connection.query(&sql, None, ExecOptions::default())
             .await
             .map_err(|e| anyhow::anyhow!("Failed to list tables: {}", e))?;
 
         if let SqlResult::Query(query_result) = result {
-            Ok(query_result.rows.iter()
-                .filter_map(|row| row.first().and_then(|v| v.clone()))
-                .collect())
+            let tables: Vec<TableInfo> = query_result.rows.iter().map(|row| {
+                let collation = row.get(5).and_then(|v| v.clone());
+                // Extract charset from collation (e.g., "utf8mb4_general_ci" -> "utf8mb4")
+                let charset = collation.as_ref().and_then(|c| {
+                    c.split('_').next().map(|s| s.to_string())
+                });
+
+                // Parse row count
+                let row_count = row.get(3).and_then(|v| v.clone()).and_then(|s| s.parse::<i64>().ok());
+
+                TableInfo {
+                    name: row.get(0).and_then(|v| v.clone()).unwrap_or_default(),
+                    comment: row.get(1).and_then(|v| v.clone()).filter(|s| !s.is_empty()),
+                    engine: row.get(2).and_then(|v| v.clone()),
+                    row_count,
+                    create_time: row.get(4).and_then(|v| v.clone()),
+                    charset,
+                    collation,
+                }
+            }).collect();
+
+            Ok(tables)
         } else {
             Err(anyhow::anyhow!("Unexpected result type"))
         }

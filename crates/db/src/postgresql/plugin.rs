@@ -71,16 +71,38 @@ impl DatabasePlugin for PostgresPlugin {
 
     // === Table Operations ===
 
-    async fn list_tables(&self, connection: &dyn DbConnection, database: &str) -> Result<Vec<String>> {
-        let sql = "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename";
+    async fn list_tables(&self, connection: &dyn DbConnection, database: &str) -> Result<Vec<TableInfo>> {
+        // Query to get all tables with their description/metadata
+        // PostgreSQL stores table comments in pg_description
+        let sql = "SELECT \
+                t.tablename, \
+                obj_description((quote_ident(t.schemaname) || '.' || quote_ident(t.tablename))::regclass) AS table_comment, \
+                (SELECT reltuples::bigint FROM pg_class WHERE relname = t.tablename AND relnamespace = 'public'::regnamespace) AS row_count \
+             FROM pg_tables t \
+             WHERE t.schemaname = 'public' \
+             ORDER BY t.tablename";
+
         let result = connection.query(sql, None, ExecOptions::default())
             .await
             .map_err(|e| anyhow::anyhow!("Failed to list tables: {}", e))?;
 
         if let SqlResult::Query(query_result) = result {
-            Ok(query_result.rows.iter()
-                .filter_map(|row| row.first().and_then(|v| v.clone()))
-                .collect())
+            let tables: Vec<TableInfo> = query_result.rows.iter().map(|row| {
+                // Parse row count
+                let row_count = row.get(2).and_then(|v| v.clone()).and_then(|s| s.parse::<i64>().ok());
+
+                TableInfo {
+                    name: row.get(0).and_then(|v| v.clone()).unwrap_or_default(),
+                    comment: row.get(1).and_then(|v| v.clone()).filter(|s| !s.is_empty()),
+                    engine: None, // PostgreSQL doesn't have engine concept like MySQL
+                    row_count,
+                    create_time: None, // Would require additional query to pg_stat_user_tables
+                    charset: None, // PostgreSQL uses database-level encoding
+                    collation: None, // PostgreSQL uses database-level collation
+                }
+            }).collect();
+
+            Ok(tables)
         } else {
             Err(anyhow::anyhow!("Unexpected result type"))
         }
