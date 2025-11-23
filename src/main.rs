@@ -19,6 +19,7 @@ mod home;
 mod database_tab;
 mod setting_tab;
 mod results_delegate;
+mod sql_result_tab;
 
 use gpui::*;
 use gpui_component::Root;

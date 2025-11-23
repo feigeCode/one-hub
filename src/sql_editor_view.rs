@@ -1,30 +1,14 @@
-use crate::results_delegate::ResultsDelegate;
 use crate::sql_editor::SqlEditor;
+use crate::sql_result_tab::SqlResultTabContainer;
 use crate::tab_container::{TabContent, TabContentType};
-use db::{DbConnectionConfig, ExecOptions, GlobalDbState, SqlResult};
+use db::{DbConnectionConfig, ExecOptions, GlobalDbState};
 use gpui::{div, px, AnyElement, App, AppContext, ClickEvent, Entity, FocusHandle, Focusable, IntoElement, ParentElement, SharedString, Styled, Window};
 use gpui_component::button::{Button, ButtonVariants};
-use gpui_component::dock::PanelView;
-use gpui_component::list::ListItem;
 use gpui_component::resizable::{resizable_panel, v_resizable};
 use gpui_component::select::{SearchableVec, Select, SelectState};
-use gpui_component::tab::{Tab, TabBar};
-use gpui_component::table::{Column, Table, TableState};
-use gpui_component::StyledExt;
 use gpui_component::{h_flex, v_flex, ActiveTheme, IconName, Sizable, Size};
 use std::any::Any;
-use std::result;
 use std::sync::{Arc, RwLock};
-
-// Structure to hold a single SQL result with its metadata
-#[derive(Clone)]
-pub struct SqlResultTab {
-    pub sql: String,
-    pub result: SqlResult,
-    pub execution_time: String,
-    pub rows_count: String,
-    pub table: Entity<TableState<ResultsDelegate>>,
-}
 
 pub struct SqlEditorTabContent {
     title: SharedString,
@@ -32,8 +16,7 @@ pub struct SqlEditorTabContent {
     // Connection configuration for this SQL editor
     config: DbConnectionConfig,
     // Multiple result tabs
-    result_tabs: Arc<RwLock<Vec<SqlResultTab>>>,
-    active_result_tab: Arc<RwLock<usize>>,
+    sql_result_tab_container: Entity<SqlResultTabContainer> ,
     status_msg: Entity<String>,
     current_database: Arc<RwLock<Option<String>>>,
     database_select: Entity<SelectState<SearchableVec<String>>>,
@@ -87,8 +70,7 @@ impl SqlEditorTabContent {
             title: title.into(),
             editor: editor.clone(),
             config: config.clone(),
-            result_tabs,
-            active_result_tab,
+            sql_result_tab_container: cx.new(|cx| SqlResultTabContainer::new(result_tabs, active_result_tab,cx)),
             status_msg,
             current_database: current_database.clone(),
             database_select: database_select.clone(),
@@ -303,17 +285,12 @@ c.data_type,
 
     fn handle_run_query(&self, _: &ClickEvent, _window: &mut Window, cx: &mut App) {
         let sql = self.get_sql_text(cx);
-        let result_tabs = self.result_tabs.clone();
-        let active_result_tab = self.active_result_tab.clone();
         let status_msg = self.status_msg.clone();
         let global_state = cx.global::<GlobalDbState>().clone();
         let config = self.config.clone();
         let current_database = self.current_database.clone();
-
-        // Clear existing result tabs
-        result_tabs.write().unwrap().clear();
-        *active_result_tab.write().unwrap() = 0;
-
+        let sql_result_tab_container = self.sql_result_tab_container.clone();
+        
         cx.spawn(async move |cx| {
             // Check if SQL is empty
             if sql.trim().is_empty() {
@@ -325,9 +302,10 @@ c.data_type,
                 }).ok();
                 return;
             }
-
+            let mut clone_config = config.clone();
+            clone_config.database = current_database.read().ok().and_then(|guard| guard.clone());
             // Get connection
-            let conn_arc = match global_state.connection_pool.get_connection(config.clone(), &global_state.db_manager).await {
+            let conn_arc = match global_state.connection_pool.get_connection(clone_config, &global_state.db_manager).await {
                 Ok(c) => c,
                 Err(e) => {
                     cx.update(|cx| {
@@ -367,125 +345,24 @@ c.data_type,
                 return;
             }
 
-            // Split SQL into individual statements for labeling
-            let sql_statements: Vec<String> = sql
-                .split(';')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect();
-
-            // Create tabs for each result
-            let mut new_tabs = Vec::new();
-            let mut total_rows = 0;
-            let mut total_time = 0.0;
-
-            for (idx, result) in results.iter().enumerate() {
-                let sql_text = sql_statements.get(idx)
-                    .map(|s| {
-                        if s.len() > 50 {
-                            format!("{}...", &s[..50])
-                        } else {
-                            s.clone()
-                        }
-                    })
-                    .unwrap_or_else(|| format!("Statement {}", idx + 1));
-
-                match result {
-                    SqlResult::Query(query_result) => {
-                        // Create table for this result
-                        let columns = query_result.columns.iter()
-                            .map(|h| Column::new(h.clone(), h.clone()))
-                            .collect();
-                        let rows =  query_result.rows.iter()
-                            .map(|row| {
-                                row.iter()
-                                    .map(|cell| cell.clone().unwrap_or_else(|| "NULL".to_string()))
-                                    .collect()
-                            })
-                            .collect();
-                        let result_delegate = ResultsDelegate::new(columns, rows);
-                        // Create table entity in UI context
-                        let table = cx.update(|cx| {
-                            cx.update_window(cx.active_window().unwrap(), |_entity, window, cx| {
-                                cx.new(|cx| TableState::new(result_delegate, window, cx))
-                            }).unwrap()
-                        }).ok().unwrap();
-
-                        total_rows += query_result.rows.len();
-                        total_time += query_result.elapsed_ms as f64;
-
-                        new_tabs.push(SqlResultTab {
-                            sql: sql_text,
-                            result: result.clone(),
-                            execution_time: format!("{}ms", query_result.elapsed_ms),
-                            rows_count: format!("{} rows", query_result.rows.len()),
-                            table,
-                        });
-                    }
-                    SqlResult::Exec(exec_result) => {
-                        // Create a summary table for exec results
-                        let columns = vec![
-                                Column::new("Status", "Status"),
-                                Column::new("Rows Affected", "Rows Affected"),
-                            ];
-                        let rows =  vec![vec![
-                            exec_result.message.clone().unwrap_or_else(|| "Success".to_string()),
-                            format!("{}", exec_result.rows_affected),
-                        ]];
-                        
-                        let result_delegate = ResultsDelegate::new(columns, rows);
-
-                        let table = cx.update(|cx| {
-                            cx.update_window(cx.active_window().unwrap(), |_entity, window, cx| {
-                                cx.new(|cx| TableState::new(result_delegate, window, cx))
-                            }).unwrap()
-                        }).ok().unwrap();
-
-                        total_time += exec_result.elapsed_ms as f64;
-
-                        new_tabs.push(SqlResultTab {
-                            sql: sql_text,
-                            result: result.clone(),
-                            execution_time: format!("{}ms", exec_result.elapsed_ms),
-                            rows_count: format!("{} rows affected", exec_result.rows_affected),
-                            table,
-                        });
-                    }
-                    SqlResult::Error(error) => {
-                        // Create error table
-                     
-                        let columns = vec![Column::new("Error", "Error")];
-                        let rows = vec![vec![error.message.clone()]];
-                        let result_delegate = ResultsDelegate::new(columns, rows);
-                        let table = cx.update(|cx| {
-                            cx.update_window(cx.active_window().unwrap(), |_entity, window, cx| {
-                                cx.new(|cx| TableState::new(result_delegate, window, cx))
-                            }).unwrap()
-                        }).ok().unwrap();
-
-                        new_tabs.push(SqlResultTab {
-                            sql: sql_text,
-                            result: result.clone(),
-                            execution_time: "Error".to_string(),
-                            rows_count: "Error".to_string(),
-                            table,
-                        });
-                    }
-                }
-            }
+            let results_len = results.len();
+            let sql_clone = sql.clone();
 
             // Update result tabs
-            *result_tabs.write().unwrap() = new_tabs;
+            let _ = cx.update(|cx| {
+                if let Some(window_id) = cx.active_window() {
+                    let _ = cx.update_window(window_id, |_entity, window, cx| {
+                        sql_result_tab_container.update(cx, |state, cx| {
+                            state.set_result(&sql_clone, results, window, cx);
+                        });
+                    });
+                }
+            });
 
             // Update status
             cx.update(|cx| {
                 status_msg.update(cx, |msg, cx| {
-                    *msg = format!(
-                        "Executed {} statement(s), {} total rows in {:.2}ms",
-                        results.len(),
-                        total_rows,
-                        total_time
-                    );
+                    *msg = format!("Executed {} statement(s)", results_len);
                     cx.notify();
                 });
             }).ok();
@@ -531,8 +408,6 @@ impl TabContent for SqlEditorTabContent {
     fn render_content(&self, window: &mut Window, cx: &mut App) -> AnyElement {
         let status_msg_render = self.status_msg.clone();
         let editor = self.editor.clone();
-        let result_tabs = self.result_tabs.clone();
-        let active_result_tab = self.active_result_tab.clone();
         let database_select = self.database_select.clone();
 
         // Build the main layout with resizable panels
@@ -639,271 +514,13 @@ impl TabContent for SqlEditorTabContent {
             .child(
                 // Bottom panel: Results with tabs
                 resizable_panel()
-                    .child({
-                        let tabs = result_tabs.read().unwrap();
-                        let active_idx = *active_result_tab.read().unwrap();
-
-                        if tabs.is_empty() {
-                            // Show empty state
-                            v_flex()
-                                .size_full()
-                                .bg(cx.theme().background)
-                                .border_1()
-                                .border_color(cx.theme().border)
-                                .rounded_md()
-                                .items_center()
-                                .justify_center()
-                                .child(
-                                    div()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .child("Execute a query to see results")
-                                )
-                        } else {
-                            // Show tabs with results
-                            v_flex()
-                                .size_full()
-                                .gap_0()
-                                .child(
-                                    // Tab bar for result tabs (摘要 + individual results)
-                                    TabBar::new("result-tabs")
-                                        .w_full()
-                                        .with_size(Size::Small)
-                                        .selected_index(active_idx)
-                                        .on_click({
-                                            let active_tab = active_result_tab.clone();
-                                            move |_ix: &usize, _w, _cx| {
-                                                *active_tab.write().unwrap() = *_ix;
-                                            }
-                                        })
-                                        .child(
-                                            // Summary tab
-                                            Tab::new().label("摘要")
-                                        )
-                                        .children(tabs.iter().enumerate().map(|(idx, tab)| {
-                                            Tab::new().label(format!("结果{} ({}, {})", idx + 1, tab.rows_count, tab.execution_time))
-                                        }))
-                                )
-                                .child(
-                                    // Active tab content
-                                    v_flex()
-                                        .flex_1()
-                                        .bg(cx.theme().background)
-                                        .border_1()
-                                        .border_color(cx.theme().border)
-                                        .rounded_md()
-                                        .overflow_hidden()
-                                        .child(
-                                            if active_idx == 0 {
-                                                // Show summary view
-                                                render_summary_view(&tabs, cx)
-                                            } else {
-                                                // Show individual result table
-                                                tabs.get(active_idx - 1)
-                                                    .map(|tab| Table::new(&tab.table.clone()).into_any_element())
-                                                    .unwrap_or_else(|| div().into_any_element())
-                                            }
-                                        )
-                                )
-                        }
-                    })
+                    .child(self.sql_result_tab_container.clone())
             )
             .into_any_element())
             .into_any_element()
     }
 }
 
-// Render summary view function
-fn render_summary_view(tabs: &[SqlResultTab], cx: &App) -> AnyElement {
-    let mut total_rows = 0;
-    let mut total_time = 0.0;
-    let mut success_count = 0;
-    let mut error_count = 0;
-
-    for tab in tabs {
-        match &tab.result {
-            SqlResult::Query(q) => {
-                total_rows += q.rows.len();
-                total_time += q.elapsed_ms as f64;
-                success_count += 1;
-            }
-            SqlResult::Exec(e) => {
-                total_rows += e.rows_affected as usize;
-                total_time += e.elapsed_ms as f64;
-                success_count += 1;
-            }
-            SqlResult::Error(_) => {
-                error_count += 1;
-            }
-        }
-    }
-
-    v_flex()
-        .size_full()
-        .p_4()
-        .gap_3()
-        .child(
-            // Summary header
-            h_flex()
-                .gap_4()
-                .items_center()
-                .child(
-                    div()
-                        .text_lg()
-                        .font_semibold()
-                        .child("执行摘要")
-                )
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(format!("共 {} 条语句", tabs.len()))
-                )
-        )
-        .child(
-            // Statistics
-            h_flex()
-                .gap_6()
-                .child(
-                    v_flex()
-                        .gap_1()
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(cx.theme().muted_foreground)
-                                .child("成功")
-                        )
-                        .child(
-                            div()
-                                .text_xl()
-                                .font_semibold()
-                                .text_color(cx.theme().success)
-                                .child(format!("{}", success_count))
-                        )
-                )
-                .child(
-                    v_flex()
-                        .gap_1()
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(cx.theme().muted_foreground)
-                                .child("失败")
-                        )
-                        .child(
-                            div()
-                                .text_xl()
-                                .font_semibold()
-                                .text_color(cx.theme().danger)
-                                .child(format!("{}", error_count))
-                        )
-                )
-                .child(
-                    v_flex()
-                        .gap_1()
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(cx.theme().muted_foreground)
-                                .child("总耗时")
-                        )
-                        .child(
-                            div()
-                                .text_xl()
-                                .font_semibold()
-                                .child(format!("{:.2}ms", total_time))
-                        )
-                )
-                .child(
-                    v_flex()
-                        .gap_1()
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(cx.theme().muted_foreground)
-                                .child("影响行数")
-                        )
-                        .child(
-                            div()
-                                .text_xl()
-                                .font_semibold()
-                                .child(format!("{}", total_rows))
-                        )
-                )
-        )
-        .child(
-            // Divider
-            div()
-                .h(px(1.))
-                .w_full()
-                .bg(cx.theme().border)
-        )
-        .child(
-            // Statement list
-            v_flex()
-                .gap_2()
-                .flex_1()
-                .overflow_y_hidden()
-                .children(tabs.iter().enumerate().map(|(idx, tab)| {
-                    let (status_icon, status_color, status_text) = match &tab.result {
-                        SqlResult::Query(q) => (
-                            IconName::Check,
-                            cx.theme().success,
-                            format!("{} rows", q.rows.len())
-                        ),
-                        SqlResult::Exec(e) => (
-                            IconName::Check,
-                            cx.theme().success,
-                            format!("{} rows affected", e.rows_affected)
-                        ),
-                        SqlResult::Error(e) => (
-                            IconName::Close,
-                            cx.theme().danger,
-                            e.message.clone()
-                        ),
-                    };
-
-                    ListItem::new(idx)
-                        .child(
-                            h_flex()
-                                .gap_3()
-                                .items_center()
-                                .w_full()
-                                .child(
-                                    // Status icon
-                                    div()
-                                        .flex_shrink_0()
-                                        .text_color(status_color)
-                                        .child(status_icon)
-                                )
-                                .child(
-                                    // SQL preview
-                                    div()
-                                        .flex_1()
-                                        .text_sm()
-                                        .truncate()
-                                        .child(format!("语句{}: {}", idx + 1, tab.sql))
-                                )
-                                .child(
-                                    // Execution time
-                                    div()
-                                        .flex_shrink_0()
-                                        .text_xs()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .child(tab.execution_time.clone())
-                                )
-                                .child(
-                                    // Status text
-                                    div()
-                                        .flex_shrink_0()
-                                        .text_xs()
-                                        .text_color(status_color)
-                                        .child(status_text)
-                                )
-                        )
-                }))
-        )
-        .into_any_element()
-}
 
 // Make it Clone so we can use it in closures
 impl Clone for SqlEditorTabContent {
@@ -912,8 +529,7 @@ impl Clone for SqlEditorTabContent {
             title: self.title.clone(),
             editor: self.editor.clone(),
             config: self.config.clone(),
-            result_tabs: self.result_tabs.clone(),
-            active_result_tab: self.active_result_tab.clone(),
+            sql_result_tab_container: self.sql_result_tab_container.clone(),
             status_msg: self.status_msg.clone(),
             current_database: self.current_database.clone(),
             database_select: self.database_select.clone(),

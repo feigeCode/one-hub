@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use gpui::{App, AppContext, Context, Entity, IntoElement, InteractiveElement, ParentElement, Render, Styled, Window, div, AnyElement, StatefulInteractiveElement, EventEmitter, SharedString, Focusable, FocusHandle, WeakEntity};
+use tracing::log::trace;
 use gpui_component::{
     ActiveTheme, IconName,
     h_flex,
@@ -516,7 +517,7 @@ impl Render for DbTreeView {
                                         // 创建 ListItem (不再添加 on_click，缩进由 context_menu_tree 处理)
                                         let view_clone = view.clone();
                                         let node_id_clone = node_id.clone();
-                                        println!("node_id: {}, item: {}", &node_id, &item.label);
+                                        trace!("node_id: {}, item: {}", &node_id, &item.label);
                                         let list_item = ListItem::new(ix)
                                             .w_full()
                                             .rounded(cx.theme().radius)
