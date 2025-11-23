@@ -56,6 +56,8 @@ impl PostgresDbConnection {
     fn extract_value(row: &PgRow, index: usize) -> Option<String> {
         use sqlx::Row;
         use sqlx::TypeInfo;
+        use sqlx::types::chrono::{NaiveDate, NaiveDateTime, NaiveTime, DateTime, Utc};
+        use sqlx::types::BigDecimal;
 
         // Check if NULL
         if let Ok(val) = row.try_get_raw(index) {
@@ -64,13 +66,43 @@ impl PostgresDbConnection {
             }
         }
 
+        // Get column type info for type-specific handling
+        let column = row.column(index);
+        let type_name = column.type_info().name().to_uppercase();
+
+        // Date and time types - must be checked BEFORE String to avoid incorrect parsing
+        // PostgreSQL types: DATE, TIME, TIMESTAMP, TIMESTAMPTZ
+        match type_name.as_str() {
+            "TIMESTAMPTZ" => {
+                if let Ok(val) = row.try_get::<DateTime<Utc>, _>(index) {
+                    return Some(val.format("%Y-%m-%d %H:%M:%S%z").to_string());
+                }
+            }
+            "TIMESTAMP" => {
+                if let Ok(val) = row.try_get::<NaiveDateTime, _>(index) {
+                    return Some(val.format("%Y-%m-%d %H:%M:%S").to_string());
+                }
+            }
+            "DATE" => {
+                if let Ok(val) = row.try_get::<NaiveDate, _>(index) {
+                    return Some(val.format("%Y-%m-%d").to_string());
+                }
+            }
+            "TIME" => {
+                if let Ok(val) = row.try_get::<NaiveTime, _>(index) {
+                    return Some(val.format("%H:%M:%S").to_string());
+                }
+            }
+            _ => {}
+        }
+
         // Try different types
-        // String types
+        // String types (VARCHAR, CHAR, TEXT, etc.)
         if let Ok(val) = row.try_get::<String, _>(index) {
             return Some(val);
         }
 
-        // Integer types
+        // Integer types (SMALLINT, INTEGER, BIGINT)
         if let Ok(val) = row.try_get::<i64, _>(index) {
             return Some(val.to_string());
         }
@@ -86,7 +118,7 @@ impl PostgresDbConnection {
             return Some(val.to_string());
         }
 
-        // Float types
+        // Float types (REAL, DOUBLE PRECISION)
         if let Ok(val) = row.try_get::<f64, _>(index) {
             return Some(val.to_string());
         }
@@ -94,22 +126,26 @@ impl PostgresDbConnection {
             return Some(val.to_string());
         }
 
-        // Binary data
+        // DECIMAL/NUMERIC type
+        if let Ok(val) = row.try_get::<BigDecimal, _>(index) {
+            return Some(val.to_string());
+        }
+
+        // Binary data (BYTEA)
         if let Ok(val) = row.try_get::<Vec<u8>, _>(index) {
             if let Ok(s) = String::from_utf8(val.clone()) {
                 return Some(s);
             }
-            return Some(format!("0x{}", hex::encode(&val)));
+            return Some(format!("\\x{}", hex::encode(&val)));
         }
 
-        // JSON types
+        // JSON/JSONB types
         if let Ok(val) = row.try_get::<serde_json::Value, _>(index) {
             return Some(val.to_string());
         }
 
         // If all else fails, return column type information
-        let column = row.column(index);
-        Some(format!("<{}>", column.type_info().name()))
+        Some(format!("<{}>", type_name))
     }
 }
 

@@ -7,6 +7,8 @@ use sqlx::{Column, MySql, MySqlPool, Row, ValueRef};
 use std::time::Instant;
 use async_trait::async_trait;
 use std::sync::RwLock;
+use sqlx::types::chrono;
+use sqlx::types::chrono::Utc;
 
 pub struct MysqlDbConnection {
     config: Option<DbConnectionConfig>,
@@ -65,6 +67,43 @@ impl MysqlDbConnection {
             }
         }
 
+        // Get column type info for type-specific handling
+        let column = row.column(index);
+        let type_name = column.type_info().name().to_uppercase();
+
+        // Date and time types - must be checked BEFORE String to avoid incorrect parsing
+        // MySQL types: DATE, DATETIME, TIME, YEAR
+        // ───────── TIME / DATE / DATETIME / TIMESTAMP 处理 ─────────
+        match type_name.as_str() {
+            "TIMESTAMP" => {
+                // 带时区类型 → DateTime<Utc>
+                if let Ok(val) = row.try_get::<chrono::DateTime<Utc>, _>(index) {
+                    return Some(val.format("%Y-%m-%d %H:%M:%S").to_string());
+                }
+            }
+            "DATETIME" => {
+                if let Ok(val) = row.try_get::<NaiveDateTime, _>(index) {
+                    return Some(val.format("%Y-%m-%d %H:%M:%S").to_string());
+                }
+            }
+            "DATE" => {
+                if let Ok(val) = row.try_get::<NaiveDate, _>(index) {
+                    return Some(val.format("%Y-%m-%d").to_string());
+                }
+            }
+            "TIME" => {
+                if let Ok(val) = row.try_get::<NaiveTime, _>(index) {
+                    return Some(val.format("%H:%M:%S").to_string());
+                }
+            }
+            "YEAR" => {
+                if let Ok(val) = row.try_get::<i16, _>(index) {
+                    return Some(val.to_string());
+                }
+            }
+            _ => {}
+        }
+
         // Try different types in order of likelihood
         // String types (VARCHAR, CHAR, TEXT, etc.)
         if let Ok(val) = row.try_get::<String, _>(index) {
@@ -117,17 +156,6 @@ impl MysqlDbConnection {
             return Some(if val { "1" } else { "0" }.to_string());
         }
 
-        // Date and time types
-        if let Ok(val) = row.try_get::<NaiveDateTime, _>(index) {
-            return Some(val.format("%Y-%m-%d %H:%M:%S").to_string());
-        }
-        if let Ok(val) = row.try_get::<NaiveDate, _>(index) {
-            return Some(val.format("%Y-%m-%d").to_string());
-        }
-        if let Ok(val) = row.try_get::<NaiveTime, _>(index) {
-            return Some(val.format("%H:%M:%S").to_string());
-        }
-
         // Binary types (BINARY, VARBINARY, BLOB)
         if let Ok(val) = row.try_get::<Vec<u8>, _>(index) {
             // For binary data, try to show as UTF-8 string first, otherwise hex
@@ -143,8 +171,7 @@ impl MysqlDbConnection {
         }
 
         // If all else fails, return column type information
-        let column = row.column(index);
-        Some(format!("<{}>", column.type_info().name()))
+        Some(format!("<{}>", type_name))
     }
 }
 
