@@ -10,32 +10,60 @@ One-Hub is a modern multi-protocol database management GUI built with Rust and G
 - **DockArea workspace**: Flexible panel layout with resizable, collapsible panels
 - **SQL editing with syntax highlighting**: Tree-sitter based highlighting for 20+ languages
 - **Database object exploration**: Lazy-loading hierarchical tree view
-- **Data import/export capabilities**: CSV, JSON, SQL, Markdown, Excel, Word formats (implemented but not yet enabled in UI)
-- **Embedded UI framework**: Full gpui-component source code (~60,000 lines) for complete control
+- **Visual table designer**: Create and modify table structures visually
+- **Data import/export**: Full UI for CSV, JSON, SQL, Markdown, Excel, Word formats
+- **Embedded UI framework**: Full gpui-component source code (~55,000 lines) for complete control
 
 ## Build and Development Commands
 
 ### Building
 - `cargo build` - Build the project in debug mode
-- `cargo build --release` - Build optimized release version
+- `cargo build --release` - Build optimized release version (LTO enabled, stripped)
 - `cargo run` - Build and run the application
 
 ### Testing
 - `cargo test` - Run all tests
-- `cargo test <test_name>` - Run specific test
+- `cargo test <test_name>` - Run specific test (filters by name substring)
+- `cargo test --no-fail-fast` - Run all tests even if some fail
 - `cargo check` - Quick syntax/type checking without building
 
+### Code Quality
+- `cargo clippy` - Run linter (see workspace lints in Cargo.toml)
+- `cargo fmt` - Format code (max_width=120, vertical fn params, reorder imports)
+- **Important lints**:
+  - `dbg_macro = "deny"` - Never commit debug macros
+  - `todo = "deny"` - No TODO markers allowed
+  - See `[workspace.lints.clippy]` in root Cargo.toml for full configuration
+
 ### Workspace Structure
-This is a Cargo workspace with **eight members**:
-- Root crate: `one-hub` (main application)
+This is a Cargo workspace with **nine members**:
+- Root crate: `one-hub` (main application, minimal - only 4 files in src/)
 - `crates/db` - Database abstraction layer with plugin system
-- `crates/ui` - **Embedded gpui-component source code** (~60,000 lines, 64+ modules)
+- `crates/db_view` - **Database UI components** (tree view, SQL editor, table designer, data import/export)
+- `crates/ui` - **Embedded gpui-component source code** (~55,000 lines, 64+ modules)
+- `crates/core` - **Shared application logic** (tab container, connection store, storage abstraction, themes)
 - `crates/macros` - Procedural macros for gpui-component
 - `crates/assets` - Embedded SVG icons and assets using rust-embed
-- `crates/core` - Currently empty, intended for shared core logic
 - `crates/mysql`, `crates/postgresql`, `crates/sqlite` - Empty placeholders for future modularization
 
 ## Architecture
+
+### Code Organization Philosophy
+
+The codebase follows a **strict separation of concerns**:
+
+1. **Root crate (`src/`)** - Minimal application entry point (only 4 files)
+   - `main.rs` - Application initialization and window setup
+   - `onehup_app.rs` - Root application state and top-level tab management
+   - `home.rs` - Home tab with connection cards
+   - `setting_tab.rs` - Settings interface
+
+2. **Database logic (`crates/db/`)** - Pure database operations, no UI
+3. **Database UI (`crates/db_view/`)** - All database-related UI components
+4. **Shared logic (`crates/core/`)** - Storage, tab management, themes
+5. **Generic UI (`crates/ui/`)** - Reusable UI framework components
+
+This separation allows clear boundaries and easier testing.
 
 ### Database Plugin System (crates/db/)
 
@@ -127,17 +155,19 @@ db::gpui_tokio::init(&mut cx);  // Must be called before any database operations
 
 The application uses a unique two-level tab architecture for flexible workspace management:
 
-**Level 1 - Top-Level Tabs** (managed by `OneHupApp`):
+**Level 1 - Top-Level Tabs** (managed by `OneHupApp` in `src/`):
 - `HomeTabContent` (`src/home.rs`): Connection cards in 3-column grid layout, non-closeable
-- `DatabaseTabContent` (`src/database_tab.rs`): Database workspace with DockArea, one per connection
+- `DatabaseTabContent` (`crates/db_view/src/database_tab.rs`): Database workspace with DockArea, one per connection
 - `SettingsTabContent` (`src/setting_tab.rs`): Application settings, closeable
 
-**Level 2 - Database Inner Tabs** (managed by `DatabaseTabContent`):
-- `SqlEditorTabContent`: SQL editor with syntax highlighting
-- `TableDataTabContent`: Table data grid view
-- `TableStructureTabContent`: Table columns, indexes, constraints
-- `ViewDataTabContent`: View data display
-- `QueryResultTabContent`: Query execution results
+**Level 2 - Database Inner Tabs** (managed by `DatabaseTabContent`, all in `crates/db_view/src/`):
+- `SqlEditorTabContent` (`sql_editor_view.rs`): SQL editor with syntax highlighting
+- `TableDataTabContent` (`table_data_tab.rs`): Table data grid view
+- `DatabaseObjectsTabContent` (`database_objects_tab.rs`): Table structure (columns, indexes, constraints)
+- `SqlResultTabContent` (`sql_result_tab.rs`): Query execution results
+- `TableDesignerView` (`table_designer_view.rs`): Visual table designer for creating/editing tables
+- `DataImportView` (`data_import_view.rs`): Import data from CSV, JSON, SQL
+- `DataExportView` (`data_export_view.rs`): Export data to multiple formats
 
 **Why Two Levels?**
 - Users can work with multiple database connections simultaneously
@@ -146,45 +176,44 @@ The application uses a unique two-level tab architecture for flexible workspace 
 - Tab bar positioned 80px from left edge to avoid macOS traffic lights
 
 **Main Application Flow**:
-1. `main.rs` - Initializes GPUI, registers Assets, initializes `db::gpui_tokio`, wraps app in `Root` for sheets/dialogs
-2. `onehup_app.rs` - Root application state with connection filtering, top-level tab management
-3. `home.rs` - Home tab showing connection cards
-4. `database_tab.rs` - Database workspace with DockArea system
-5. `setting_tab.rs` - Settings interface (placeholder)
+1. `src/main.rs` - Initializes GPUI, registers Assets, sets up GlobalDbState, wraps app in `Root` for sheets/dialogs
+2. `src/onehup_app.rs` - Root application state with connection filtering, top-level tab management
+3. `src/home.rs` - Home tab showing connection cards in 3-column grid
+4. `db_view::database_tab::DatabaseTabContent` - Database workspace with DockArea system
+5. `src/setting_tab.rs` - Settings interface (placeholder)
 
-**Key UI Components**:
-- `DbTreeView` (`src/db_tree_view.rs`) - Lazy-loading hierarchical tree with PanelView integration
+**Key UI Components** (all in `crates/db_view/src/`):
+
+- `DbTreeView` (`db_tree_view.rs`) - Lazy-loading hierarchical tree with PanelView integration
   - Maintains `loaded_children` and `loading_nodes` sets for optimization
   - Implements `PanelView` trait for DockArea compatibility
   - Emits events: `OpenTableData`, `OpenTableStructure`, `OpenViewData`, `ConnectToConnection`, `CreateNewQuery`
   - Node IDs format: `<connection_id>:<database>:<folder_type>:<object_name>`
 
-- `DatabaseTabContent` (`src/database_tab.rs`) - DockArea-based database workspace
+- `DatabaseTabContent` (`database_tab.rs`) - DockArea-based database workspace
   - **Left panel**: DbTreeView (280px width, collapsible)
   - **Center panel**: TabPanel for SQL editors and data views
   - `DatabaseEventHandler`: Subscribes to tree events, creates corresponding tabs
   - Async connection with loading state and error display
   - Auto-connects on tab creation, disconnects on tab close
 
-- `DbWorkspace` (`src/db_workspace.rs`) - Experimental/advanced workspace implementation
-  - Layout versioning system (current: v5)
-  - Layout persistence to JSON file
-  - More flexible DockArea configuration
-  - May replace `DatabaseTabContent` in future
-
-- `TabContainer` (`src/tab_container.rs`) - Customizable tab management
-  - Strategy pattern with `TabContent` trait
-  - Color customization API: `with_tab_bar_colors()`, `with_tab_item_colors()`, `with_tab_content_colors()`
-  - Tab type checking: `has_tab_type()`
-  - Drag-and-drop tab reordering
-  - Right-click context menu
-
-- `SqlEditorTabContent` (`src/sql_editor_view.rs`) - SQL editing with tree-sitter syntax highlighting
+- `SqlEditorTabContent` (`sql_editor_view.rs`) - SQL editing with tree-sitter syntax highlighting
   - Database selector dropdown, execute button, multi-result tabs
   - Displays execution time and row counts
   - Based on gpui-component's advanced Input component with LSP support
 
-- `DbConnectionForm` (`src/db_connection_form.rs`) - Connection configuration UI
+- `TableDesignerView` (`table_designer_view.rs`) - Visual table designer
+  - Create/edit table structure visually
+  - Column definitions, data types, constraints
+  - Primary/foreign key management
+  - Index configuration
+
+- `DataImportView` / `DataExportView` (`data_import_view.rs`, `data_export_view.rs`)
+  - Import: CSV, JSON, SQL formats with preview
+  - Export: CSV, JSON, SQL, Markdown, Excel, Word formats
+  - Progress tracking and error handling
+
+- `DbConnectionForm` (`db_connection_form.rs`) - Connection configuration UI
   - Supports MySQL and PostgreSQL with test connection functionality
   - Integrates with ConnectionStore for persistence
 
@@ -227,20 +256,34 @@ The application uses a unique two-level tab architecture for flexible workspace 
 - Charts (line, bar, area, pie)
 - WebView support
 
-### Storage Layer (src/storage/)
+### Storage Layer (crates/core/src/storage/)
 
 **Generic Storage Abstraction**:
 - `Storage<T>` trait - Async CRUD operations (insert, update, delete, get, list, clear)
 - `Queryable<T>` trait - Extended queries (find_by, find_one_by, count, exists)
 - `SqliteStorage` - Concrete implementation using SQLx SQLite driver
 
-**ConnectionStore** (`src/connection_store.rs`):
+**ConnectionStore** (`crates/core/src/connection_store.rs`):
 - High-level API wrapping SqliteStorage
 - Database location: `~/.config/one-hub/one-hub.db` (macOS/Linux) or `%APPDATA%/one-hub/one-hub.db` (Windows)
 - Automatic database initialization and schema creation
 - Timestamp management (created_at, updated_at)
 
-### Data Import/Export (src/data_export.rs, src/data_import.rs)
+**Tab Management** (`crates/core/src/tab_container.rs`):
+- `TabContainer` - Customizable tab management with strategy pattern
+- `TabContent` trait - Different tab content types implement this
+- Color customization API: `with_tab_bar_colors()`, `with_tab_item_colors()`, `with_tab_content_colors()`
+- Tab type checking: `has_tab_type()`
+- Drag-and-drop tab reordering
+- Right-click context menu
+
+**Themes** (`crates/core/src/themes.rs`):
+- `SwitchThemeMode` - Theme switching utilities
+- Integration with gpui-component theme system
+
+### Data Import/Export (crates/db_view/src/)
+
+**Status**: ✅ **Fully implemented with UI** in `data_import_view.rs` and `data_export_view.rs`
 
 **Export Formats**:
 - CSV (RFC 4180 compliant with field escaping)
@@ -255,12 +298,56 @@ The application uses a unique two-level tab architecture for flexible workspace 
 - JSON (array of objects/arrays, NDJSON support)
 - SQL (raw scripts)
 
-**Status**: Fully implemented but **not yet enabled in UI**. Code exists in `src/data_export.rs` and `src/data_import.rs`.
+**UI Features**:
+- File picker integration using `rfd` crate
+- Progress tracking and error handling
+- Data preview before import
+- Format selection and configuration
 
-**Key Functions**:
-- `export_to_path()` - Write to file with directory creation
-- `export_to_bytes()` - Return as UTF-8 bytes
-- `import_from_csv()`, `import_from_json()`, `import_from_sql()`
+## Coding Standards
+
+### Import Order Rules
+
+**CRITICAL**: Always follow this import order when editing source files:
+
+```rust
+// 1. Standard library imports
+use std::sync::Arc;
+
+// 2. External crate imports (alphabetically ordered)
+use anyhow::Result;
+use gpui::{prelude::*, *};
+use gpui_component::{
+    button::{Button, ButtonVariants},
+    ActiveTheme, StyledExt,
+};
+
+// 3. Current crate imports (grouped by module)
+use crate::{
+    connection::DbConnection,
+    plugin::DatabasePlugin,
+};
+```
+
+**Why this matters**: Consistent imports improve readability and reduce merge conflicts.
+
+### Rustfmt Configuration
+
+The project uses custom rustfmt settings (`rustfmt.toml`):
+- **max_width = 120** - Wider lines for better use of screen space
+- **fn_params_layout = "Vertical"** - Function parameters on separate lines
+- **reorder_imports = true** - Automatically sort imports
+- **reorder_modules = true** - Automatically sort module declarations
+
+Run `cargo fmt` before committing.
+
+### Clippy Lints
+
+Key denied lints (will cause compilation failure):
+- **dbg_macro** - Use proper logging instead
+- **todo** - No TODO markers in committed code
+
+See `[workspace.lints.clippy]` in root `Cargo.toml` for the full list.
 
 ## Key Design Patterns
 
@@ -476,8 +563,8 @@ To add a new database type (e.g., SQLite, Redis, MongoDB):
 ### 6. Two-Level Tab Confusion
 **Problem**: Adding tabs to wrong container
 **Solution**:
-- Use `OneHupApp.tab_container` for top-level tabs (Home, Database, Settings)
-- Use `DatabaseTabContent.dock_area` center panel for database inner tabs (SQL editors, table data)
+- Use `OneHupApp` (in `src/onehup_app.rs`) for top-level tabs (Home, Database, Settings)
+- Use `DatabaseTabContent.dock_area` (in `crates/db_view/src/database_tab.rs`) center panel for database inner tabs (SQL editors, table data)
 
 ### 7. Event Handler Subscription
 **Problem**: Tree events not reaching tab container
@@ -487,39 +574,43 @@ To add a new database type (e.g., SQLite, Redis, MongoDB):
 
 When working on specific features, know where to look:
 
-**Application Structure**:
-- **Main entry**: `src/main.rs`
-- **Root app state**: `src/onehup_app.rs`
-- **Home tab**: `src/home.rs`
-- **Database workspace**: `src/database_tab.rs`
-- **Advanced workspace**: `src/db_workspace.rs` (experimental)
-- **Settings tab**: `src/setting_tab.rs`
+**Application Structure** (minimal, only 4 files):
+- **Main entry**: `src/main.rs` (1,800 lines)
+- **Root app state**: `src/onehup_app.rs` (2,900 lines) - Top-level tab management
+- **Home tab**: `src/home.rs` (16,300 lines) - Connection cards and management
+- **Settings tab**: `src/setting_tab.rs` (1,400 lines)
 
-**Database Layer**:
-- **Database plugin logic**: `crates/db/src/<dbname>/plugin.rs`
-- **Connection management**: `crates/db/src/<dbname>/connection.rs`
-- **Async runtime bridge**: `crates/db/src/gpui_tokio.rs` ⚠️ **NEW**
-- **SQL parsing**: `crates/db/src/executor.rs`
-- **Type definitions**: `crates/db/src/types.rs`
-- **Manager & pool**: `crates/db/src/manager.rs`
+**Database Layer** (`crates/db/`):
+- **Database plugin logic**: `src/<dbname>/plugin.rs` (MySQL, PostgreSQL)
+- **Connection management**: `src/<dbname>/connection.rs`
+- **Async runtime bridge**: `src/gpui_tokio.rs` ⚠️ **CRITICAL**
+- **SQL parsing**: `src/executor.rs` (SqlScriptSplitter, SqlStatementClassifier)
+- **Type definitions**: `src/types.rs` (DatabaseType, DbConnectionConfig, QueryResult)
+- **Manager & pool**: `src/manager.rs` (DbManager, ConnectionPool, GlobalDbState)
 
-**UI Components**:
-- **UI tree navigation**: `src/db_tree_view.rs`
-- **SQL editor**: `src/sql_editor_view.rs`, `src/sql_editor.rs`
-- **Tab management**: `src/tab_container.rs`, `src/tab_contents.rs`
-- **Connection forms**: `src/db_connection_form.rs`
+**Database UI Components** (`crates/db_view/src/`):
+- **Tree navigation**: `db_tree_view.rs` (35,400 lines)
+- **Database workspace**: `database_tab.rs` (24,500 lines)
+- **SQL editor**: `sql_editor_view.rs` (21,800 lines), `sql_editor.rs` (26,000 lines)
+- **Table data**: `table_data_tab.rs` (8,700 lines)
+- **Table designer**: `table_designer_view.rs` (36,500 lines)
+- **Object details**: `database_objects_tab.rs`, `object_detail/` (multiple views)
+- **SQL results**: `sql_result_tab.rs` (15,100 lines), `results_delegate.rs`
+- **Import/Export**: `data_import_view.rs` (13,700 lines), `data_export_view.rs` (14,700 lines)
+- **Connection form**: `db_connection_form.rs` (20,400 lines)
 
-**UI Framework** (embedded):
-- **DockArea**: `crates/ui/src/dock/`
-- **Advanced Input**: `crates/ui/src/input/`
-- **Highlighter**: `crates/ui/src/highlighter/`
-- **Table/List/Tree**: `crates/ui/src/{table,list,tree}/`
-- **Theme system**: `crates/ui/src/theme/`
+**UI Framework** (`crates/ui/`, embedded ~55,000 lines):
+- **DockArea**: `src/dock/` (resizable panels, layout persistence)
+- **Advanced Input**: `src/input/` (LSP, tree-sitter, multi-cursor)
+- **Highlighter**: `src/highlighter/` (20+ languages)
+- **Table/List/Tree**: `src/{table,list,tree}/` (virtual rendering)
+- **Theme system**: `src/theme/` (JSON-based, light/dark)
 
-**Storage & Data**:
-- **Persistent storage**: `src/storage/sqlite_backend.rs`
-- **Connection store**: `src/connection_store.rs`
-- **Import/Export**: `src/data_export.rs`, `src/data_import.rs` (not yet enabled)
+**Shared Logic** (`crates/core/src/`):
+- **Tab container**: `tab_container.rs` (27,700 lines) - Generic tab management
+- **Connection store**: `connection_store.rs` (2,600 lines) - Persistent connection storage
+- **Storage abstraction**: `storage/` (SQLite backend, generic CRUD traits)
+- **Themes**: `themes.rs` (2,500 lines) - Theme switching utilities
 
 **Assets**:
-- **Icons**: `crates/assets/assets/icons/`
+- **Icons & Fonts**: `crates/assets/assets/icons/` (SVG icons embedded with rust-embed)

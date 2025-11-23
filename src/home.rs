@@ -9,7 +9,7 @@ use core::storage::{StoredConnection, ConnectionType};
 use db_view::database_tab::DatabaseTabContent;
 use crate::setting_tab::SettingsTabContent;
 use core::themes::SwitchThemeMode;
-use db::{DatabasePlugin, DatabaseType, DbConnectionConfig};
+use db::{ DatabaseType, DbConnectionConfig};
 use db_view::db_connection_form::{DbConnectionForm, DbConnectionFormEvent, DbFormConfig};
 use core::tab_container::{TabContainer, TabContent, TabContentType, TabItem};
 
