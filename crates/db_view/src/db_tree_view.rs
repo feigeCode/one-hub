@@ -435,6 +435,25 @@ impl DbTreeView {
         self.db_nodes.get(node_id)
     }
 
+    /// 获取当前选中的数据库名称
+    pub fn get_selected_database(&self) -> Option<String> {
+        if let Some(item) = &self.selected_item {
+            // 从选中的节点ID中提取数据库名
+            if let Some(node) = self.db_nodes.get(item.id.as_ref()) {
+                match node.node_type {
+                    db::types::DbNodeType::Database => {
+                        return Some(node.name.clone());
+                    }
+                    _ => {
+                        // 从父节点上下文中查找数据库
+                        return self.find_parent_database(item.id.as_ref());
+                    }
+                }
+            }
+        }
+        None
+    }
+
     /// 查找节点所属的数据库名称
     fn find_parent_database(&self, node_id: &str) -> Option<String> {
         // 向上遍历查找数据库节点
@@ -591,7 +610,8 @@ impl Render for DbTreeView {
                                                                 }
                                                                 DbNodeType::Table => {
                                                                     let table_name = node.name.clone();
-                                                                    let database_name = node.parent_context.clone().unwrap_or_else(|| "unknown".to_string());
+                                                                    // TODO 获取真实数据
+                                                                    let database_name = "ai_app".to_string();
                                                                     let table_for_import = table_name.clone();
                                                                     let db_for_import = database_name.clone();
                                                                     let table_for_export = table_name.clone();

@@ -127,9 +127,9 @@ impl DatabaseEventHandler {
                     });
                 }
                 DbTreeViewEvent::OpenTableStructure { database, table } => {
-                    use crate::table_structure_tab::TableStructureTabContent;
+                    use crate::table_designer_view::TableDesignerView;
 
-                    let tab_id = format!("table-structure-{}.{}", database, table);
+                    let tab_id = format!("table-designer-{}.{}", database, table);
                     let database_clone = database.clone();
                     let table_clone = table.clone();
                     let config = conn_info_clone.to_db_connection();
@@ -139,14 +139,14 @@ impl DatabaseEventHandler {
                         container.activate_or_add_tab_lazy(
                             tab_id.clone(),
                             |window, cx| {
-                                let table_structure = TableStructureTabContent::new(
+                                let table_designer = TableDesignerView::edit_table(
                                     database_clone,
                                     table_clone,
                                     config,
                                     window,
                                     cx,
                                 );
-                                TabItem::new(tab_id, table_structure)
+                                TabItem::new(tab_id, table_designer.read(cx).clone())
                             },
                             window,
                             cx,
@@ -495,8 +495,12 @@ impl DatabaseTabContent {
             .into_any_element()
     }
 
-    fn render_toolbar(&self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render_toolbar(&self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         use gpui_component::button::Button;
+
+        let db_tree_view = self.db_tree_view.clone();
+        let tab_container = self.tab_container.clone();
+        let connection_info = self.connection_info.clone();
 
         h_flex()
             .w_full()
@@ -527,6 +531,27 @@ impl DatabaseTabContent {
                     .child("新建表")
                     .ghost()
                     .tooltip("新建表")
+                    .on_click(move |_, window, cx| {
+                        use crate::table_designer_view::TableDesignerView;
+                        
+                        // 获取当前选中的数据库
+                        let current_db = db_tree_view.read(cx).get_selected_database();
+                        let database = current_db.unwrap_or_else(|| "default".to_string());
+                        let config = connection_info.to_db_connection();
+                        
+                        let tab_id = format!("new-table-{}", Uuid::new_v4());
+                        
+                        tab_container.update(cx, |container, cx| {
+                            let table_designer = TableDesignerView::new_table(
+                                database,
+                                config,
+                                window,
+                                cx,
+                            );
+                            let tab = TabItem::new(tab_id, table_designer.read(cx).clone());
+                            container.add_and_activate_tab(tab, cx);
+                        });
+                    })
             )
     }
 }

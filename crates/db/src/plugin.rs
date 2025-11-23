@@ -306,4 +306,19 @@ pub trait DatabasePlugin: Send + Sync {
     ) -> Result<Vec<SqlResult>>;
 
     async fn switch_db(&self, connection: &dyn DbConnection, database: &str) -> Result<SqlResult>;
+
+    // === Data Types ===
+    /// Get list of available data types for this database
+    fn get_data_types(&self) -> Vec<DataTypeInfo> {
+        // Default implementation with common types
+        vec![
+            DataTypeInfo::new("INT", "Integer number"),
+            DataTypeInfo::new("VARCHAR(255)", "Variable-length string"),
+            DataTypeInfo::new("TEXT", "Long text"),
+            DataTypeInfo::new("DATE", "Date"),
+            DataTypeInfo::new("DATETIME", "Date and time"),
+            DataTypeInfo::new("BOOLEAN", "True/False"),
+            DataTypeInfo::new("DECIMAL(10,2)", "Decimal number"),
+        ]
+    }
 }

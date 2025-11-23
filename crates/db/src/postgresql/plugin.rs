@@ -569,6 +569,51 @@ impl DatabasePlugin for PostgresPlugin {
             message: Some(message),
         }))
     }
+
+    fn get_data_types(&self) -> Vec<DataTypeInfo> {
+        vec![
+            // 数值类型
+            DataTypeInfo::new("SMALLINT", "Small integer (-32768 to 32767)").with_category(DataTypeCategory::Numeric),
+            DataTypeInfo::new("INTEGER", "Standard integer").with_category(DataTypeCategory::Numeric),
+            DataTypeInfo::new("BIGINT", "Large integer").with_category(DataTypeCategory::Numeric),
+            DataTypeInfo::new("DECIMAL(10,2)", "Exact numeric").with_category(DataTypeCategory::Numeric),
+            DataTypeInfo::new("NUMERIC(10,2)", "Exact numeric (alias)").with_category(DataTypeCategory::Numeric),
+            DataTypeInfo::new("REAL", "Single-precision floating-point").with_category(DataTypeCategory::Numeric),
+            DataTypeInfo::new("DOUBLE PRECISION", "Double-precision floating-point").with_category(DataTypeCategory::Numeric),
+            DataTypeInfo::new("SERIAL", "Auto-incrementing integer").with_category(DataTypeCategory::Numeric),
+            DataTypeInfo::new("BIGSERIAL", "Auto-incrementing bigint").with_category(DataTypeCategory::Numeric),
+            
+            // 字符串类型
+            DataTypeInfo::new("CHAR(255)", "Fixed-length string").with_category(DataTypeCategory::String),
+            DataTypeInfo::new("VARCHAR(255)", "Variable-length string").with_category(DataTypeCategory::String),
+            DataTypeInfo::new("TEXT", "Variable-length text").with_category(DataTypeCategory::String),
+            
+            // 日期时间类型
+            DataTypeInfo::new("DATE", "Date (no time)").with_category(DataTypeCategory::DateTime),
+            DataTypeInfo::new("TIME", "Time (no date)").with_category(DataTypeCategory::DateTime),
+            DataTypeInfo::new("TIMESTAMP", "Date and time").with_category(DataTypeCategory::DateTime),
+            DataTypeInfo::new("TIMESTAMPTZ", "Timestamp with timezone").with_category(DataTypeCategory::DateTime),
+            DataTypeInfo::new("INTERVAL", "Time interval").with_category(DataTypeCategory::DateTime),
+            
+            // 布尔类型
+            DataTypeInfo::new("BOOLEAN", "True/False").with_category(DataTypeCategory::Boolean),
+            
+            // 二进制类型
+            DataTypeInfo::new("BYTEA", "Binary data").with_category(DataTypeCategory::Binary),
+            
+            // 结构化类型
+            DataTypeInfo::new("JSON", "JSON document").with_category(DataTypeCategory::Structured),
+            DataTypeInfo::new("JSONB", "Binary JSON (indexed)").with_category(DataTypeCategory::Structured),
+            DataTypeInfo::new("XML", "XML document").with_category(DataTypeCategory::Structured),
+            DataTypeInfo::new("ARRAY", "Array type").with_category(DataTypeCategory::Structured),
+            
+            // 其他类型
+            DataTypeInfo::new("UUID", "Universally unique identifier").with_category(DataTypeCategory::Other),
+            DataTypeInfo::new("INET", "IP address").with_category(DataTypeCategory::Other),
+            DataTypeInfo::new("CIDR", "Network address").with_category(DataTypeCategory::Other),
+            DataTypeInfo::new("MACADDR", "MAC address").with_category(DataTypeCategory::Other),
+        ]
+    }
 }
 
 impl Default for PostgresPlugin {

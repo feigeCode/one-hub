@@ -212,6 +212,64 @@ pub struct SequenceInfo {
     pub max_value: Option<i64>,
 }
 
+/// Data type information for table designer
+#[derive(Debug, Clone)]
+pub struct DataTypeInfo {
+    pub name: String,
+    pub description: String,
+    pub category: DataTypeCategory,
+}
+
+impl DataTypeInfo {
+    pub fn new(name: impl Into<String>, description: impl Into<String>) -> Self {
+        let name_str = name.into();
+        let category = Self::infer_category(&name_str);
+        Self {
+            name: name_str,
+            description: description.into(),
+            category,
+        }
+    }
+
+    pub fn with_category(mut self, category: DataTypeCategory) -> Self {
+        self.category = category;
+        self
+    }
+
+    fn infer_category(name: &str) -> DataTypeCategory {
+        let upper = name.to_uppercase();
+        if upper.contains("INT") || upper.contains("SERIAL") || upper.contains("BIGINT") || upper.contains("SMALLINT") {
+            DataTypeCategory::Numeric
+        } else if upper.contains("CHAR") || upper.contains("TEXT") || upper.contains("CLOB") {
+            DataTypeCategory::String
+        } else if upper.contains("DATE") || upper.contains("TIME") || upper.contains("TIMESTAMP") {
+            DataTypeCategory::DateTime
+        } else if upper.contains("BOOL") {
+            DataTypeCategory::Boolean
+        } else if upper.contains("BLOB") || upper.contains("BINARY") || upper.contains("BYTEA") {
+            DataTypeCategory::Binary
+        } else if upper.contains("JSON") || upper.contains("XML") {
+            DataTypeCategory::Structured
+        } else if upper.contains("DECIMAL") || upper.contains("NUMERIC") || upper.contains("FLOAT") || upper.contains("DOUBLE") || upper.contains("REAL") {
+            DataTypeCategory::Numeric
+        } else {
+            DataTypeCategory::Other
+        }
+    }
+}
+
+/// Data type category for grouping
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DataTypeCategory {
+    Numeric,
+    String,
+    DateTime,
+    Boolean,
+    Binary,
+    Structured,
+    Other,
+}
+
 /// Database type enumeration
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum DatabaseType {
