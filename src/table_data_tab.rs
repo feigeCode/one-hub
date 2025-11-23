@@ -1,20 +1,19 @@
 use std::any::Any;
-use std::sync::Arc;
 
 use gpui::{
-    div, AnyElement, App, AppContext, ClickEvent, Context, Entity, EventEmitter, Focusable, FocusHandle,
-    IntoElement, ParentElement, Render, SharedString, Styled, WeakEntity, Window,
+    div, AnyElement, App, AppContext, ClickEvent, Entity, FocusHandle, Focusable,
+    IntoElement, ParentElement, SharedString, Styled, Window,
 };
 use gpui_component::{
     button::{Button, ButtonVariants as _},
     h_flex,
-    table::{Column, Table, TableDelegate, TableState},
+    table::{Column, Table, TableState},
     v_flex, ActiveTheme as _, IconName, Sizable as _, Size,
 };
 
-use db::{DbConnectionConfig, GlobalDbState};
+use crate::results_delegate::ResultsDelegate;
 use crate::tab_container::{TabContent, TabContentType};
-
+use db::{DbConnectionConfig, GlobalDbState};
 // ============================================================================
 // Table Data Tab Content - Display table rows
 // ============================================================================
@@ -23,10 +22,10 @@ pub struct TableDataTabContent {
     database_name: String,
     table_name: String,
     config: DbConnectionConfig,
-    delegate: Arc<std::sync::RwLock<ResultsDelegate>>,
-    table: Entity<TableState<DelegateWrapper>>,
+    table: Entity<TableState<ResultsDelegate>>,
     status_msg: Entity<String>,
     focus_handle: FocusHandle,
+    delegate: ResultsDelegate,
 }
 
 impl TableDataTabContent {
@@ -39,15 +38,8 @@ impl TableDataTabContent {
     ) -> Self {
         let database_name = database_name.into();
         let table_name = table_name.into();
-        let delegate = Arc::new(std::sync::RwLock::new(ResultsDelegate {
-            columns: vec![],
-            rows: vec![],
-        }));
-
-        let delegate_wrapper = DelegateWrapper {
-            inner: delegate.clone(),
-        };
-        let table = cx.new(|cx| TableState::new(delegate_wrapper, window, cx));
+        let delegate = ResultsDelegate::new(vec![], vec![]);
+        let table = cx.new(|cx| TableState::new(delegate.clone(), window, cx));
         let status_msg = cx.new(|_| "Loading...".to_string());
         let focus_handle = cx.focus_handle();
 
@@ -55,10 +47,10 @@ impl TableDataTabContent {
             database_name: database_name.clone(),
             table_name: table_name.clone(),
             config: config.clone(),
-            delegate: delegate.clone(),
             table: table.clone(),
             status_msg: status_msg.clone(),
             focus_handle,
+            delegate,
         };
 
         // Load data initially
@@ -67,12 +59,18 @@ impl TableDataTabContent {
         result
     }
 
+    fn update_status(status_msg: &Entity<String>, message: String, cx: &mut App) {
+        status_msg.update(cx, |s, cx| {
+            *s = message;
+            cx.notify();
+        });
+    }
+
     fn load_data(&self, cx: &mut App) {
         let global_state = cx.global::<GlobalDbState>().clone();
         let config = self.config.clone();
         let table_name = self.table_name.clone();
         let database_name = self.database_name.clone();
-        let delegate = self.delegate.clone();
         let status_msg = self.status_msg.clone();
         let table_state = self.table.clone();
 
@@ -81,12 +79,8 @@ impl TableDataTabContent {
                 Ok(p) => p,
                 Err(e) => {
                     cx.update(|cx| {
-                        status_msg.update(cx, |s, cx| {
-                            *s = format!("Failed to get plugin: {}", e);
-                            cx.notify();
-                        });
-                    })
-                    .ok();
+                        Self::update_status(&status_msg, format!("Failed to get plugin: {}", e), cx);
+                    }).ok();
                     return;
                 }
             };
@@ -99,12 +93,8 @@ impl TableDataTabContent {
                 Ok(c) => c,
                 Err(e) => {
                     cx.update(|cx| {
-                        status_msg.update(cx, |s, cx| {
-                            *s = format!("Connection failed: {}", e);
-                            cx.notify();
-                        });
-                    })
-                    .ok();
+                        Self::update_status(&status_msg, format!("Connection failed: {}", e), cx);
+                    }).ok();
                     return;
                 }
             };
@@ -136,46 +126,29 @@ impl TableDataTabContent {
                     let row_count = rows.len();
 
                     cx.update(|cx| {
-                        delegate.write().unwrap().columns = columns;
-                        delegate.write().unwrap().rows = rows;
-
-                        status_msg.update(cx, |s, cx| {
-                            *s = format!("Loaded {} rows", row_count);
-                            cx.notify();
+                        table_state.update(cx, |state, cx| {
+                            state.delegate_mut().update_data(columns, rows);
+                            state.refresh(cx);
                         });
 
-                        table_state.update(cx, |_state, cx| {
-                            cx.notify();
-                        });
+                        Self::update_status(&status_msg, format!("Loaded {} rows", row_count), cx);
                     })
                     .ok();
                 }
                 Ok(db::SqlResult::Error(err)) => {
                     cx.update(|cx| {
-                        status_msg.update(cx, |s, cx| {
-                            *s = format!("Query error: {}", err.message);
-                            cx.notify();
-                        });
-                    })
-                    .ok();
+                        Self::update_status(&status_msg, format!("Query error: {}", err.message), cx);
+                    }).ok();
                 }
                 Ok(_) => {
                     cx.update(|cx| {
-                        status_msg.update(cx, |s, cx| {
-                            *s = "Unexpected result type".to_string();
-                            cx.notify();
-                        });
-                    })
-                    .ok();
+                        Self::update_status(&status_msg, "Unexpected result type".to_string(), cx);
+                    }).ok();
                 }
                 Err(e) => {
                     cx.update(|cx| {
-                        status_msg.update(cx, |s, cx| {
-                            *s = format!("Query failed: {}", e);
-                            cx.notify();
-                        });
-                    })
-                    .ok();
+                        Self::update_status(&status_msg, format!("Query failed: {}", e), cx);
+                    }).ok();
                 }
             }
         })
@@ -247,7 +220,11 @@ impl TabContent for TableDataTabContent {
                     .border_color(cx.theme().border)
                     .rounded_md()
                     .overflow_hidden()
-                    .child(Table::new(&self.table)),
+                    .child(
+                        Table::new(&self.table)
+                            .stripe(true)
+                            .bordered(false)
+                    ),
             )
             .into_any_element()
     }
@@ -267,17 +244,11 @@ impl Clone for TableDataTabContent {
             database_name: self.database_name.clone(),
             table_name: self.table_name.clone(),
             config: self.config.clone(),
-            delegate: self.delegate.clone(),
             table: self.table.clone(),
             status_msg: self.status_msg.clone(),
             focus_handle: self.focus_handle.clone(),
+            delegate: self.delegate.clone(),
         }
-    }
-}
-
-impl Render for TableDataTabContent {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        div().size_full().child(self.render_content(window, cx))
     }
 }
 
@@ -287,69 +258,4 @@ impl Focusable for TableDataTabContent {
     }
 }
 
-// ============================================================================
-// Helper Types
-// ============================================================================
 
-pub struct ResultsDelegate {
-    pub columns: Vec<Column>,
-    pub rows: Vec<Vec<String>>,
-}
-
-impl TableDelegate for ResultsDelegate {
-    fn columns_count(&self, _cx: &App) -> usize {
-        self.columns.len()
-    }
-    fn rows_count(&self, _cx: &App) -> usize {
-        self.rows.len()
-    }
-    fn column(&self, col_ix: usize, _cx: &App) -> &Column {
-        &self.columns[col_ix]
-    }
-    fn render_td(
-        &self,
-        row: usize,
-        col: usize,
-        _window: &mut Window,
-        _cx: &mut App,
-    ) -> impl IntoElement {
-        self.rows
-            .get(row)
-            .and_then(|r| r.get(col))
-            .cloned()
-            .unwrap_or_default()
-    }
-}
-
-#[derive(Clone)]
-pub struct DelegateWrapper {
-    pub inner: Arc<std::sync::RwLock<ResultsDelegate>>,
-}
-
-impl TableDelegate for DelegateWrapper {
-    fn columns_count(&self, _cx: &App) -> usize {
-        self.inner.read().unwrap().columns.len()
-    }
-    fn rows_count(&self, _cx: &App) -> usize {
-        self.inner.read().unwrap().rows.len()
-    }
-    fn column(&self, col_ix: usize, _cx: &App) -> &Column {
-        unsafe { &*(&self.inner.read().unwrap().columns[col_ix] as *const Column) }
-    }
-    fn render_td(
-        &self,
-        row: usize,
-        col: usize,
-        _window: &mut Window,
-        _cx: &mut App,
-    ) -> impl IntoElement {
-        self.inner
-            .read()
-            .unwrap()
-            .rows
-            .get(row)
-            .and_then(|r| r.get(col))
-            .cloned()
-            .unwrap_or_default()
-    }
-}

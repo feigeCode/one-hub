@@ -1,20 +1,20 @@
-use std::sync::{Arc, RwLock};
-use std::any::Any;
-use gpui::{div, px, AnyElement, App, AppContext, ClickEvent, Entity, IntoElement, ParentElement, SharedString, Styled, Window, Focusable, FocusHandle, EventEmitter, Render, Context, EntityId, WeakEntity, AnyView};
-use gpui_component::{h_flex, v_flex, ActiveTheme, IconName, Sizable, Size};
-use gpui_component::button::{Button, ButtonVariants};
-use gpui_component::table::{Column, Table, TableState};
-use gpui_component::select::{SelectState, Select, SearchableVec};
-use gpui_component::tab::{Tab, TabBar};
-use gpui_component::resizable::{v_resizable, resizable_panel};
-use gpui_component::list::ListItem;
-use gpui_component::StyledExt;
-use gpui_component::dock::{Panel, PanelControl, PanelEvent, PanelState, PanelView, TabPanel, TitleStyle};
-use db::{GlobalDbState, ExecOptions, SqlResult, DbConnectionConfig};
-use gpui_component::menu::PopupMenu;
+use crate::results_delegate::ResultsDelegate;
 use crate::sql_editor::SqlEditor;
 use crate::tab_container::{TabContent, TabContentType};
-use crate::tab_contents::{DelegateWrapper};
+use db::{DbConnectionConfig, ExecOptions, GlobalDbState, SqlResult};
+use gpui::{div, px, AnyElement, App, AppContext, ClickEvent, Entity, FocusHandle, Focusable, IntoElement, ParentElement, SharedString, Styled, Window};
+use gpui_component::button::{Button, ButtonVariants};
+use gpui_component::dock::PanelView;
+use gpui_component::list::ListItem;
+use gpui_component::resizable::{resizable_panel, v_resizable};
+use gpui_component::select::{SearchableVec, Select, SelectState};
+use gpui_component::tab::{Tab, TabBar};
+use gpui_component::table::{Column, Table, TableState};
+use gpui_component::StyledExt;
+use gpui_component::{h_flex, v_flex, ActiveTheme, IconName, Sizable, Size};
+use std::any::Any;
+use std::result;
+use std::sync::{Arc, RwLock};
 
 // Structure to hold a single SQL result with its metadata
 #[derive(Clone)]
@@ -23,7 +23,7 @@ pub struct SqlResultTab {
     pub result: SqlResult,
     pub execution_time: String,
     pub rows_count: String,
-    pub table: Entity<TableState<DelegateWrapper>>,
+    pub table: Entity<TableState<ResultsDelegate>>,
 }
 
 pub struct SqlEditorTabContent {
@@ -393,27 +393,21 @@ c.data_type,
                 match result {
                     SqlResult::Query(query_result) => {
                         // Create table for this result
-                        let delegate = Arc::new(RwLock::new(crate::tab_contents::ResultsDelegate {
-                            columns: query_result.columns.iter()
-                                .map(|h| Column::new(h.clone(), h.clone()))
-                                .collect(),
-                            rows: query_result.rows.iter()
-                                .map(|row| {
-                                    row.iter()
-                                        .map(|cell| cell.clone().unwrap_or_else(|| "NULL".to_string()))
-                                        .collect()
-                                })
-                                .collect(),
-                        }));
-
-                        let delegate_wrapper = DelegateWrapper {
-                            inner: delegate.clone(),
-                        };
-
+                        let columns = query_result.columns.iter()
+                            .map(|h| Column::new(h.clone(), h.clone()))
+                            .collect();
+                        let rows =  query_result.rows.iter()
+                            .map(|row| {
+                                row.iter()
+                                    .map(|cell| cell.clone().unwrap_or_else(|| "NULL".to_string()))
+                                    .collect()
+                            })
+                            .collect();
+                        let result_delegate = ResultsDelegate::new(columns, rows);
                         // Create table entity in UI context
                         let table = cx.update(|cx| {
                             cx.update_window(cx.active_window().unwrap(), |_entity, window, cx| {
-                                cx.new(|cx| TableState::new(delegate_wrapper, window, cx))
+                                cx.new(|cx| TableState::new(result_delegate, window, cx))
                             }).unwrap()
                         }).ok().unwrap();
 
@@ -430,24 +424,20 @@ c.data_type,
                     }
                     SqlResult::Exec(exec_result) => {
                         // Create a summary table for exec results
-                        let delegate = Arc::new(RwLock::new(crate::tab_contents::ResultsDelegate {
-                            columns: vec![
+                        let columns = vec![
                                 Column::new("Status", "Status"),
                                 Column::new("Rows Affected", "Rows Affected"),
-                            ],
-                            rows: vec![vec![
-                                exec_result.message.clone().unwrap_or_else(|| "Success".to_string()),
-                                format!("{}", exec_result.rows_affected),
-                            ]],
-                        }));
-
-                        let delegate_wrapper = DelegateWrapper {
-                            inner: delegate.clone(),
-                        };
+                            ];
+                        let rows =  vec![vec![
+                            exec_result.message.clone().unwrap_or_else(|| "Success".to_string()),
+                            format!("{}", exec_result.rows_affected),
+                        ]];
+                        
+                        let result_delegate = ResultsDelegate::new(columns, rows);
 
                         let table = cx.update(|cx| {
                             cx.update_window(cx.active_window().unwrap(), |_entity, window, cx| {
-                                cx.new(|cx| TableState::new(delegate_wrapper, window, cx))
+                                cx.new(|cx| TableState::new(result_delegate, window, cx))
                             }).unwrap()
                         }).ok().unwrap();
 
@@ -463,18 +453,13 @@ c.data_type,
                     }
                     SqlResult::Error(error) => {
                         // Create error table
-                        let delegate = Arc::new(RwLock::new(crate::tab_contents::ResultsDelegate {
-                            columns: vec![Column::new("Error", "Error")],
-                            rows: vec![vec![error.message.clone()]],
-                        }));
-
-                        let delegate_wrapper = DelegateWrapper {
-                            inner: delegate.clone(),
-                        };
-
+                     
+                        let columns = vec![Column::new("Error", "Error")];
+                        let rows = vec![vec![error.message.clone()]];
+                        let result_delegate = ResultsDelegate::new(columns, rows);
                         let table = cx.update(|cx| {
                             cx.update_window(cx.active_window().unwrap(), |_entity, window, cx| {
-                                cx.new(|cx| TableState::new(delegate_wrapper, window, cx))
+                                cx.new(|cx| TableState::new(result_delegate, window, cx))
                             }).unwrap()
                         }).ok().unwrap();
 
@@ -937,90 +922,8 @@ impl Clone for SqlEditorTabContent {
     }
 }
 
-impl EventEmitter<PanelEvent> for SqlEditorTabContent {}
-
-impl Render for SqlEditorTabContent {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // Delegate to render_content for the actual content
-        div()
-            .size_full()
-            .child(self.render_content(window, cx))
-    }
-}
-
 impl Focusable for SqlEditorTabContent {
     fn focus_handle(&self, _cx: &App) -> FocusHandle {
         self.focus_handle.clone()
-    }
-}
-
-impl Panel for SqlEditorTabContent {
-    fn panel_name(&self) -> &'static str {
-        "SqlEditor"
-    }
-
-    fn tab_name(&self, cx: &App) -> Option<SharedString> {
-        Some(self.title.clone())
-    }
-
-    fn title(&self, window: &Window, cx: &App) -> AnyElement {
-        h_flex()
-            .items_center()
-            .gap_2()
-            .child(IconName::File)
-            .child(self.title.clone())
-            .into_any_element()
-    }
-
-    fn title_style(&self, cx: &App) -> Option<TitleStyle> {
-        None
-    }
-
-    fn title_suffix(&self, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
-        None
-    }
-
-    fn closable(&self, cx: &App) -> bool {
-        true
-    }
-
-    fn zoomable(&self, cx: &App) -> Option<PanelControl> {
-        None
-    }
-
-    fn visible(&self, cx: &App) -> bool {
-        true
-    }
-
-    fn set_active(&mut self, active: bool, window: &mut Window, cx: &mut App) {
-        // No special handling needed for active state
-    }
-
-    fn set_zoomed(&mut self, zoomed: bool, window: &mut Window, cx: &mut App) {
-        // No special handling needed for zoomed state
-    }
-
-    fn on_added_to(&mut self, tab_panel: WeakEntity<TabPanel>, window: &mut Window, cx: &mut App) {
-        // No special handling needed when added to tab panel
-    }
-
-    fn on_removed(&mut self, window: &mut Window, cx: &mut App) {
-        // No special handling needed when removed
-    }
-
-    fn dropdown_menu(&self, this: PopupMenu, window: &Window, cx: &App) -> PopupMenu {
-        this
-    }
-
-    fn toolbar_buttons(&self, window: &mut Window, cx: &mut App) -> Option<Vec<Button>> {
-        None
-    }
-
-    fn dump(&self, cx: &App) -> PanelState {
-        PanelState::new(self)
-    }
-
-    fn inner_padding(&self, cx: &App) -> bool {
-        false
     }
 }

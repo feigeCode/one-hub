@@ -8,7 +8,7 @@
 **不要修改无关文件**
 **不要修改任何代码警告**
 gpui源码目录在：/Users/hufei/RustroverProjects/zed/crates/gpui
-
+gpui-component每个组件的story所在目录：/Users/hufei/RustroverProjects/gpui-component/crates/story
 ## 编码规则
 
 编辑源代码之后，需要检查导入代码是否符合规则

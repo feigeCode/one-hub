@@ -4,7 +4,6 @@ mod sql_editor;
 mod db_tree_view;
 // mod data_export;
 mod tab_container;
-mod tab_contents;
 mod table_data_tab;
 mod table_structure_tab;
 // mod data_import;
@@ -19,6 +18,7 @@ mod onehup_app;
 mod home;
 mod database_tab;
 mod setting_tab;
+mod results_delegate;
 
 use gpui::*;
 use gpui_component::Root;
