@@ -4,7 +4,6 @@ use crate::mysql::connection::MysqlDbConnection;
 use crate::plugin::DatabasePlugin;
 use crate::types::*;
 use anyhow::Result;
-use sqlx::Row;
 use std::collections::HashMap;
 
 /// MySQL database plugin implementation (stateless)

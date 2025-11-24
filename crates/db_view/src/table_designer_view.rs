@@ -589,6 +589,7 @@ impl TableDesignerView {
         let data_types = self.data_types.clone();
         let selected_type = field.selected_type.read(cx).clone();
         let view_entity = cx.entity();
+        let view_entity_for_menu = view_entity.clone();
 
         h_flex()
             .gap_2()
@@ -610,6 +611,7 @@ impl TableDesignerView {
                             .icon(IconName::ChevronDown)
                     )
                     .dropdown_menu(move |menu, window, _| {
+                        let view_entity = view_entity_for_menu.clone();
                         let mut menu = menu;
                         
                         // 按类别分组
@@ -693,7 +695,7 @@ impl TableDesignerView {
                     .child(
                         Switch::new(SharedString::from(format!("nullable-{}", field_id)))
                             .checked(*field.nullable.read(cx))
-                            .on_click(window.listener_for(&cx.entity(), move |this, _, _, cx| {
+                            .on_click(window.listener_for(&view_entity, move |this, _, _, cx| {
                                 this.toggle_nullable(field_id, cx);
                             }))
                     )
@@ -707,7 +709,7 @@ impl TableDesignerView {
                     .child(
                         Switch::new(SharedString::from(format!("pk-{}", field_id)))
                             .checked(*field.primary_key.read(cx))
-                            .on_click(window.listener_for(&cx.entity(), move |this, _, _, cx| {
+                            .on_click(window.listener_for(&view_entity, move |this, _, _, cx| {
                                 this.toggle_primary_key(field_id, cx);
                             }))
                     )
@@ -727,7 +729,7 @@ impl TableDesignerView {
                     .icon(IconName::Delete)
                     .ghost()
                     .small()
-                    .on_click(window.listener_for(&cx.entity(), move |this, _, window, cx| {
+                    .on_click(window.listener_for(&view_entity, move |this, _, window, cx| {
                         this.delete_field(field_id, window, cx);
                     }))
             )
