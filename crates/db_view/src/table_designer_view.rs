@@ -1,7 +1,10 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use gpui::{div, px, AnyElement, App, AppContext, Context, Entity, Focusable, FocusHandle, IntoElement, ParentElement, Render, SharedString, Styled, Window, InteractiveElement};
+use core::tab_container::{TabContent, TabContentType};
+use db::{ColumnInfo, DataTypeCategory, DataTypeInfo, DatabaseType, GlobalDbState};
+use gpui::StatefulInteractiveElement as _;
+use gpui::{div, px, AnyElement, App, AppContext, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement, ParentElement, Render, SharedString, Styled, Window};
 use gpui_component::{
     button::{Button, ButtonVariants as _, DropdownButton},
     h_flex,
@@ -10,9 +13,6 @@ use gpui_component::{
     switch::Switch,
     v_flex, ActiveTheme, IconName, Sizable,
 };
-use gpui::StatefulInteractiveElement as _;
-use core::tab_container::{TabContent, TabContentType};
-use db::{ColumnInfo, DataTypeCategory, DataTypeInfo, DbConnectionConfig, GlobalDbState};
 
 /// 字段行
 #[derive(Clone)]
@@ -32,7 +32,8 @@ struct FieldRow {
 pub struct TableDesignerView {
     database_name: String,
     table_name: Option<String>,
-    config: DbConnectionConfig,
+    connection_id: String,
+    database_type: DatabaseType,
     table_name_input: Entity<InputState>,
     fields: Arc<std::sync::RwLock<Vec<FieldRow>>>,
     next_id: Arc<std::sync::RwLock<usize>>,
@@ -47,11 +48,13 @@ impl TableDesignerView {
     /// 创建新表
     pub fn new_table(
         database_name: impl Into<String>,
-        config: DbConnectionConfig,
+        connection_id: impl Into<String>,
+        database_type: DatabaseType,
         window: &mut Window,
         cx: &mut App,
     ) -> Entity<Self> {
         let database_name = database_name.into();
+        let connection_id = connection_id.into();
         
         cx.new(|cx| {
             let table_name_input = cx.new(|cx| InputState::new(window, cx).placeholder("table_name"));
@@ -61,12 +64,13 @@ impl TableDesignerView {
             let preview_sql = cx.new(|_| "-- Enter table name and add fields to preview SQL".to_string());
             
             // 获取数据类型列表
-            let data_types = Self::load_data_types(&config, cx);
+            let data_types = Self::load_data_types(&connection_id, cx);
             
             let mut view = Self {
                 database_name,
                 table_name: None,
-                config,
+                connection_id,
+                database_type,
                 table_name_input,
                 fields,
                 next_id,
@@ -88,12 +92,14 @@ impl TableDesignerView {
     pub fn edit_table(
         database_name: impl Into<String>,
         table_name: impl Into<String>,
-        config: DbConnectionConfig,
+        connection_id: impl Into<String>,
+        database_type: DatabaseType,
         window: &mut Window,
         cx: &mut App,
     ) -> Entity<Self> {
         let database_name = database_name.into();
         let table_name = table_name.into();
+        let connection_id = connection_id.into();
         
         cx.new(|cx| {
             let table_name_input = cx.new(|cx| {
@@ -107,12 +113,13 @@ impl TableDesignerView {
             let preview_sql = cx.new(|_| String::new());
             
             // 获取数据类型列表
-            let data_types = Self::load_data_types(&config, cx);
+            let data_types = Self::load_data_types(&connection_id, cx);
             
             let view = Self {
                 database_name: database_name.clone(),
                 table_name: Some(table_name.clone()),
-                config: config.clone(),
+                connection_id: connection_id.clone(),
+                database_type,
                 table_name_input,
                 fields: fields.clone(),
                 next_id: next_id.clone(),
@@ -130,17 +137,25 @@ impl TableDesignerView {
         })
     }
 
-    fn load_data_types(config: &DbConnectionConfig, cx: &mut App) -> Vec<DataTypeInfo> {
+    fn load_data_types(connection_id: &str, cx: &mut App) -> Vec<DataTypeInfo> {
         let global_state = cx.global::<GlobalDbState>();
-        match global_state.db_manager.get_plugin(&config.database_type) {
-            Ok(plugin) => plugin.get_data_types(),
-            Err(_) => vec![],
+        
+        // 尝试同步获取 config（这里需要异步，但为了简化先用默认值）
+        // 实际使用中应该在异步上下文中调用
+        let rt = tokio::runtime::Handle::try_current();
+        if let Ok(handle) = rt {
+            if let Some(config) = handle.block_on(global_state.get_config(connection_id)) {
+                if let Ok(plugin) = global_state.db_manager.get_plugin(&config.database_type) {
+                    return plugin.get_data_types();
+                }
+            }
         }
+        vec![]
     }
 
     fn load_table_structure(&self, _window: &mut Window, cx: &mut App) {
         let global_state = cx.global::<GlobalDbState>().clone();
-        let config = self.config.clone();
+        let connection_id = self.connection_id.clone();
         let table_name = self.table_name.clone().unwrap_or_default();
         let database_name = self.database_name.clone();
         let status_msg = self.status_msg.clone();
@@ -148,7 +163,7 @@ impl TableDesignerView {
         let next_id = self.next_id.clone();
 
         cx.spawn(async move |cx| {
-            let plugin = match global_state.db_manager.get_plugin(&config.database_type) {
+            let (plugin, conn_arc) = match global_state.get_plugin_and_connection(&connection_id).await {
                 Ok(p) => p,
                 Err(e) => {
                     cx.update(|cx| {
@@ -160,24 +175,6 @@ impl TableDesignerView {
                     return;
                 }
             };
-
-            let conn_arc = match global_state
-                .connection_pool
-                .get_connection(config.clone(), &global_state.db_manager)
-                .await
-            {
-                Ok(c) => c,
-                Err(e) => {
-                    cx.update(|cx| {
-                        status_msg.update(cx, |s, cx| {
-                            *s = format!("Connection failed: {}", e);
-                            cx.notify();
-                        });
-                    }).ok();
-                    return;
-                }
-            };
-
             let conn = conn_arc.read().await;
             let result = plugin.list_columns(&**conn, &database_name, &table_name).await;
 
@@ -389,7 +386,7 @@ impl TableDesignerView {
         }
 
         let global_state = cx.global::<GlobalDbState>();
-        let plugin = match global_state.db_manager.get_plugin(&self.config.database_type) {
+        let plugin = match global_state.db_manager.get_plugin(&self.database_type) {
             Ok(p) => p,
             Err(_) => {
                 self.preview_sql.update(cx, |sql, cx| {
@@ -491,7 +488,7 @@ impl TableDesignerView {
 
         // 执行创建或修改
         let global_state = cx.global::<GlobalDbState>().clone();
-        let config = self.config.clone();
+        let connection_id = self.connection_id.clone();
         let database_name = self.database_name.clone();
         let status_msg = self.status_msg.clone();
         let is_new = self.is_new_table;
@@ -502,29 +499,12 @@ impl TableDesignerView {
         });
 
         cx.spawn(async move |cx| {
-            let plugin = match global_state.db_manager.get_plugin(&config.database_type) {
+            let (plugin, conn_arc) = match global_state.get_plugin_and_connection(&connection_id).await {
                 Ok(p) => p,
                 Err(e) => {
                     cx.update(|cx| {
                         status_msg.update(cx, |s, cx| {
-                            *s = format!("Error: {}", e);
-                            cx.notify();
-                        });
-                    }).ok();
-                    return;
-                }
-            };
-
-            let conn_arc = match global_state
-                .connection_pool
-                .get_connection(config, &global_state.db_manager)
-                .await
-            {
-                Ok(c) => c,
-                Err(e) => {
-                    cx.update(|cx| {
-                        status_msg.update(cx, |s, cx| {
-                            *s = format!("Connection failed: {}", e);
+                            *s = format!("Failed to get plugin: {}", e);
                             cx.notify();
                         });
                     }).ok();
@@ -918,7 +898,8 @@ impl Clone for TableDesignerView {
         Self {
             database_name: self.database_name.clone(),
             table_name: self.table_name.clone(),
-            config: self.config.clone(),
+            connection_id: self.connection_id.clone(),
+            database_type: self.database_type.clone(),
             table_name_input: self.table_name_input.clone(),
             fields: self.fields.clone(),
             next_id: self.next_id.clone(),

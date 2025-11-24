@@ -13,8 +13,7 @@ use std::sync::{Arc, RwLock};
 pub struct SqlEditorTabContent {
     title: SharedString,
     editor: Entity<SqlEditor>,
-    // Connection configuration for this SQL editor
-    config: DbConnectionConfig,
+    connection_id: String,
     // Multiple result tabs
     sql_result_tab_container: Entity<SqlResultTabContainer> ,
     status_msg: Entity<String>,
@@ -30,23 +29,13 @@ impl SqlEditorTabContent {
         window: &mut Window,
         cx: &mut App,
     ) -> Self {
-        // Create a default/empty config - should not be used in practice
-        let config = DbConnectionConfig {
-            id: "".to_string(),
-            database_type: db::DatabaseType::MySQL,
-            name: "No Connection".to_string(),
-            host: "localhost".to_string(),
-            port: 3306,
-            username: "".to_string(),
-            password: "".to_string(),
-            database: None,
-        };
-        Self::new_with_config(title, config, None, window, cx)
+        // Create with empty connection_id - should not be used in practice
+        Self::new_with_config(title, "", None, window, cx)
     }
 
     pub fn new_with_config(
         title: impl Into<SharedString>,
-        config: DbConnectionConfig,
+        connection_id: impl Into<String>,
         initial_database: Option<String>,
         window: &mut Window,
         cx: &mut App,
@@ -69,7 +58,7 @@ impl SqlEditorTabContent {
         let instance = Self {
             title: title.into(),
             editor: editor.clone(),
-            config: config.clone(),
+            connection_id: connection_id.into(),
             sql_result_tab_container: cx.new(|cx| SqlResultTabContainer::new(result_tabs, active_result_tab,cx)),
             status_msg,
             current_database: current_database.clone(),
@@ -127,26 +116,16 @@ impl SqlEditorTabContent {
     /// Load databases into the select dropdown
     fn load_databases_async(&self, cx: &mut App) {
         let global_state = cx.global::<GlobalDbState>().clone();
-        let config = self.config.clone();
+        let connection_id = self.connection_id.clone();
         let current_database = self.current_database.clone();
         let database_select = self.database_select.clone();
 
         // Spawn async task to load databases
         cx.spawn(async move |cx| {
-            // Get connection
-            let conn_arc = match global_state.connection_pool.get_connection(config.clone(), &global_state.db_manager).await {
-                Ok(c) => c,
+            let (plugin, conn_arc) = match global_state.get_plugin_and_connection(&connection_id).await {
+                Ok(result) => result,
                 Err(e) => {
                     eprintln!("Failed to get connection: {}", e);
-                    return;
-                }
-            };
-
-            // Get plugin
-            let plugin = match global_state.db_manager.get_plugin(&config.database_type) {
-                Ok(p) => p,
-                Err(e) => {
-                    eprintln!("Failed to get plugin: {}", e);
                     return;
                 }
             };
@@ -206,25 +185,15 @@ impl SqlEditorTabContent {
         use crate::sql_editor::SqlSchema;
 
         let global_state = cx.global::<GlobalDbState>().clone();
-        let config = self.config.clone();
+        let connection_id = self.connection_id.clone();
         let editor = self.editor.clone();
         let db = database.to_string();
 
         cx.spawn(async move |cx| {
-            // Get connection
-            let conn_arc = match global_state.connection_pool.get_connection(config.clone(), &global_state.db_manager).await {
-                Ok(c) => c,
+            let (plugin, conn_arc) = match global_state.get_plugin_and_connection(&connection_id).await {
+                Ok(result) => result,
                 Err(e) => {
                     eprintln!("Failed to get connection: {}", e);
-                    return;
-                }
-            };
-
-            // Get plugin
-            let plugin = match global_state.db_manager.get_plugin(&config.database_type) {
-                Ok(p) => p,
-                Err(e) => {
-                    eprintln!("Failed to get plugin: {}", e);
                     return;
                 }
             };
@@ -287,7 +256,7 @@ c.data_type,
         let sql = self.get_sql_text(cx);
         let status_msg = self.status_msg.clone();
         let global_state = cx.global::<GlobalDbState>().clone();
-        let config = self.config.clone();
+        let connection_id = self.connection_id.clone();
         let current_database = self.current_database.clone();
         let sql_result_tab_container = self.sql_result_tab_container.clone();
         
@@ -302,10 +271,25 @@ c.data_type,
                 }).ok();
                 return;
             }
-            let mut clone_config = config.clone();
-            clone_config.database = current_database.read().ok().and_then(|guard| guard.clone());
-            // Get connection
-            let conn_arc = match global_state.connection_pool.get_connection(clone_config, &global_state.db_manager).await {
+            
+            // Get connection with current database
+            let config = match global_state.get_config(&connection_id).await {
+                Some(mut cfg) => {
+                    cfg.database = current_database.read().ok().and_then(|guard| guard.clone());
+                    cfg
+                }
+                None => {
+                    cx.update(|cx| {
+                        status_msg.update(cx, |msg, cx| {
+                            *msg = "Connection not found".to_string();
+                            cx.notify();
+                        });
+                    }).ok();
+                    return;
+                }
+            };
+            
+            let conn_arc = match global_state.connection_pool.get_connection(config, &global_state.db_manager).await {
                 Ok(c) => c,
                 Err(e) => {
                     cx.update(|cx| {
@@ -528,7 +512,7 @@ impl Clone for SqlEditorTabContent {
         Self {
             title: self.title.clone(),
             editor: self.editor.clone(),
-            config: self.config.clone(),
+            connection_id: self.connection_id.clone(),
             sql_result_tab_container: self.sql_result_tab_container.clone(),
             status_msg: self.status_msg.clone(),
             current_database: self.current_database.clone(),

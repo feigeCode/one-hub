@@ -201,6 +201,8 @@ impl Clone for ConnectionPool {
 pub struct GlobalDbState {
     pub db_manager: DbManager,
     pub connection_pool: ConnectionPool,
+    /// connection_id -> config 映射
+    connections: Arc<RwLock<HashMap<String, DbConnectionConfig>>>,
 }
 
 impl GlobalDbState {
@@ -208,7 +210,34 @@ impl GlobalDbState {
         Self {
             db_manager: DbManager::new(),
             connection_pool: ConnectionPool::new(),
+            connections: Arc::new(RwLock::new(HashMap::new())),
         }
+    }
+
+    /// 注册连接配置
+    pub async fn register_connection(&self, config: DbConnectionConfig) {
+        let mut connections = self.connections.write().await;
+        connections.insert(config.id.clone(), config);
+    }
+
+    /// 根据 connection_id 获取配置
+    pub async fn get_config(&self, connection_id: &str) -> Option<DbConnectionConfig> {
+        let connections = self.connections.read().await;
+        connections.get(connection_id).cloned()
+    }
+
+    /// 获取 plugin 和 connection（封装重复逻辑）
+    pub async fn get_plugin_and_connection(
+        &self,
+        connection_id: &str,
+    ) -> Result<(Box<dyn DatabasePlugin>, Arc<RwLock<Box<dyn DbConnection + Send + Sync>>>), DbError> {
+        let config = self.get_config(connection_id).await
+            .ok_or_else(|| DbError::ConnectionError(format!("Connection not found: {}", connection_id)))?;
+
+        let plugin = self.db_manager.get_plugin(&config.database_type)?;
+        let conn = self.connection_pool.get_connection(config, &self.db_manager).await?;
+
+        Ok((plugin, conn))
     }
 }
 

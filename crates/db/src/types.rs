@@ -17,6 +17,7 @@ pub enum SqlValue {
 /// Database tree node types for hierarchical display
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum DbNodeType {
+    Connection,
     Database,
     TablesFolder,
     Table,
@@ -39,6 +40,7 @@ pub enum DbNodeType {
 impl fmt::Display for DbNodeType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            DbNodeType::Connection => write!(f, "Connection"),
             DbNodeType::Database => write!(f, "Database"),
             DbNodeType::TablesFolder => write!(f, "Tables"),
             DbNodeType::Table => write!(f, "Table"),

@@ -55,8 +55,8 @@ pub struct DbTreeView {
     items: Vec<TreeItem>,
     // 当前连接名称
     connection_name: Option<String>,
-    // 数据库连接配置
-    config: DbConnectionConfig,
+    // 连接 ID（单一数据源）
+    connection_id: String,
 }
 
 impl DbTreeView {
@@ -65,6 +65,16 @@ impl DbTreeView {
         let tree_state = cx.new(|cx| {
             ContextMenuTreeState::new(cx)
         });
+        
+        let connection_id = connection.id.unwrap().to_string();
+        let config = connection.to_db_connection();
+        
+        // 注册连接配置到 GlobalDbState
+        let global_state = cx.global::<GlobalDbState>().clone();
+        cx.spawn(async move |_, _| {
+            global_state.register_connection(config).await;
+        }).detach();
+        
         Self {
             focus_handle,
             tree_state,
@@ -75,7 +85,7 @@ impl DbTreeView {
             expanded_nodes: HashSet::new(),
             items: vec![],
             connection_name: None,
-            config: connection.to_db_connection(),
+            connection_id,
         }
     }
 
@@ -128,22 +138,13 @@ impl DbTreeView {
     pub fn refresh_tree(&mut self, cx: &mut Context<Self>) {
         let global_state = cx.global::<GlobalDbState>().clone();
         let tree_state = self.tree_state.clone();
-        let config = self.config.clone();
+        let connection_id = self.connection_id.clone();
         
         cx.spawn(async move |this, cx| {
-            // Get plugin
-            let plugin = match global_state.db_manager.get_plugin(&config.database_type) {
-                Ok(p) => p,
+            let (plugin, conn_arc) = match global_state.get_plugin_and_connection(&connection_id).await {
+                Ok(result) => result,
                 Err(e) => {
-                    eprintln!("Failed to get plugin: {}", e);
-                    return;
-                }
-            };
-            
-            let conn_arc = match global_state.connection_pool.get_connection(config, &global_state.db_manager).await {
-                Ok(c) => c,
-                Err(e) => {
-                    eprintln!("Failed to get connection: {}", e);
+                    eprintln!("Failed to get plugin and connection: {}", e);
                     return;
                 }
             };
@@ -240,13 +241,11 @@ impl DbTreeView {
 
         let global_state = cx.global::<GlobalDbState>().clone();
         let clone_node_id = node_id.clone();
-        let config = self.config.clone();
+        let connection_id = self.connection_id.clone();
         cx.spawn(async move |this, cx| {
             // 使用 DatabasePlugin 的方法加载子节点
             let children_result = spawn_result(async move {
-                // 检查是否已连接
-                let plugin = global_state.db_manager.get_plugin(&config.database_type)?;
-                let conn_arc = global_state.connection_pool.get_connection(config, &global_state.db_manager).await?;
+                let (plugin, conn_arc) = global_state.get_plugin_and_connection(&connection_id).await?;
                 let conn = conn_arc.read().await;
 
                 // 加载子节点并返回结果
@@ -378,6 +377,7 @@ impl DbTreeView {
     fn get_icon_for_node(&self, node_id: &str, is_expanded: bool) -> IconName {
         let node = self.db_nodes.get(node_id);
         match node.map(|n| &n.node_type) {
+            Some(DbNodeType::Connection) => IconName::Folder,
             Some(DbNodeType::Database) => IconName::DATABASE,
             Some(DbNodeType::TablesFolder) | Some(DbNodeType::ViewsFolder) |
             Some(DbNodeType::FunctionsFolder) | Some(DbNodeType::ProceduresFolder) |

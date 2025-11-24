@@ -13,7 +13,7 @@ use gpui_component::{
 use db::{DataFormat, DataImporter, DbConnectionConfig, GlobalDbState, ImportConfig};
 
 pub struct DataImportView {
-    config: DbConnectionConfig,
+    connection_id: String,
     database: Entity<InputState>,
     table: Entity<InputState>,
     format: Entity<DataFormat>,
@@ -28,7 +28,7 @@ pub struct DataImportView {
 
 impl DataImportView {
     pub fn new(
-        config: DbConnectionConfig,
+        connection_id: impl Into<String>,
         database: String,
         window: &mut Window,
         cx: &mut App,
@@ -42,7 +42,7 @@ impl DataImportView {
             let table_input = cx.new(|cx| InputState::new(window, cx));
 
             Self {
-                config,
+                connection_id: connection_id.into(),
                 database: database_input,
                 table: table_input,
                 format: cx.new(|_| DataFormat::Sql),
@@ -88,9 +88,9 @@ impl DataImportView {
         .detach();
     }
 
-    fn start_import(&mut self, window: &mut Window, cx: &mut App) {
+    fn start_import(&mut self, _window: &mut Window, cx: &mut App) {
         let global_state = cx.global::<GlobalDbState>().clone();
-        let config = self.config.clone();
+        let connection_id = self.connection_id.clone();
 
         let database = self.database.read(cx).text().to_string();
         let table = self.table.read(cx).text().to_string();
@@ -116,6 +116,19 @@ impl DataImportView {
         });
 
         cx.spawn(async move |cx| {
+            let config = match global_state.get_config(&connection_id).await {
+                Some(cfg) => cfg,
+                None => {
+                    cx.update(|cx| {
+                        status.update(cx, |s, cx| {
+                            *s = "Connection not found".to_string();
+                            cx.notify();
+                        });
+                    }).ok();
+                    return;
+                }
+            };
+
             let plugin = match global_state.db_manager.get_plugin(&config.database_type) {
                 Ok(p) => p,
                 Err(e) => {
@@ -207,7 +220,7 @@ impl Focusable for DataImportView {
 impl Clone for DataImportView {
     fn clone(&self) -> Self {
         Self {
-            config: self.config.clone(),
+            connection_id: self.connection_id.clone(),
             database: self.database.clone(),
             table: self.table.clone(),
             format: self.format.clone(),

@@ -13,7 +13,7 @@ use gpui_component::{
 use db::{DataExporter, DataFormat, DbConnectionConfig, ExportConfig, GlobalDbState};
 
 pub struct DataExportView {
-    config: DbConnectionConfig,
+    connection_id: String,
     database: Entity<InputState>,
     pub tables: Entity<InputState>,
     format: Entity<DataFormat>,
@@ -29,7 +29,7 @@ pub struct DataExportView {
 
 impl DataExportView {
     pub fn new(
-        config: DbConnectionConfig,
+        connection_id: impl Into<String>,
         database: String,
         window: &mut Window,
         cx: &mut App,
@@ -45,7 +45,7 @@ impl DataExportView {
             let limit_input = cx.new(|cx| InputState::new(window, cx));
 
             Self {
-                config,
+                connection_id: connection_id.into(),
                 database: database_input,
                 tables: tables_input,
                 format: cx.new(|_| DataFormat::Sql),
@@ -92,9 +92,9 @@ impl DataExportView {
         .detach();
     }
 
-    fn start_export(&mut self, window: &mut Window, cx: &mut App) {
+    fn start_export(&mut self, _window: &mut Window, cx: &mut App) {
         let global_state = cx.global::<GlobalDbState>().clone();
-        let config = self.config.clone();
+        let connection_id = self.connection_id.clone();
 
         let database = self.database.read(cx).text().to_string();
         let tables_str = self.tables.read(cx).text().to_string();
@@ -147,6 +147,19 @@ impl DataExportView {
         });
 
         cx.spawn(async move |cx| {
+            let config = match global_state.get_config(&connection_id).await {
+                Some(cfg) => cfg,
+                None => {
+                    cx.update(|cx| {
+                        status.update(cx, |s, cx| {
+                            *s = "Connection not found".to_string();
+                            cx.notify();
+                        });
+                    }).ok();
+                    return;
+                }
+            };
+
             let plugin = match global_state.db_manager.get_plugin(&config.database_type) {
                 Ok(p) => p,
                 Err(e) => {
@@ -228,7 +241,7 @@ impl Focusable for DataExportView {
 impl Clone for DataExportView {
     fn clone(&self) -> Self {
         Self {
-            config: self.config.clone(),
+            connection_id: self.connection_id.clone(),
             database: self.database.clone(),
             tables: self.tables.clone(),
             format: self.format.clone(),

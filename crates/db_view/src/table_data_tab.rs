@@ -21,7 +21,7 @@ use db::{DbConnectionConfig, GlobalDbState};
 pub struct TableDataTabContent {
     database_name: String,
     table_name: String,
-    config: DbConnectionConfig,
+    connection_id: String,
     table: Entity<TableState<ResultsDelegate>>,
     status_msg: Entity<String>,
     focus_handle: FocusHandle,
@@ -32,12 +32,13 @@ impl TableDataTabContent {
     pub fn new(
         database_name: impl Into<String>,
         table_name: impl Into<String>,
-        config: DbConnectionConfig,
+        connection_id: impl Into<String>,
         window: &mut Window,
         cx: &mut App,
     ) -> Self {
         let database_name = database_name.into();
         let table_name = table_name.into();
+        let connection_id = connection_id.into();
         let delegate = ResultsDelegate::new(vec![], vec![]);
         let table = cx.new(|cx| TableState::new(delegate.clone(), window, cx));
         let status_msg = cx.new(|_| "Loading...".to_string());
@@ -46,7 +47,7 @@ impl TableDataTabContent {
         let result = Self {
             database_name: database_name.clone(),
             table_name: table_name.clone(),
-            config: config.clone(),
+            connection_id,
             table: table.clone(),
             status_msg: status_msg.clone(),
             focus_handle,
@@ -68,32 +69,18 @@ impl TableDataTabContent {
 
     fn load_data(&self, cx: &mut App) {
         let global_state = cx.global::<GlobalDbState>().clone();
-        let config = self.config.clone();
+        let connection_id = self.connection_id.clone();
         let table_name = self.table_name.clone();
         let database_name = self.database_name.clone();
         let status_msg = self.status_msg.clone();
         let table_state = self.table.clone();
 
         cx.spawn(async move |cx| {
-            let plugin = match global_state.db_manager.get_plugin(&config.database_type) {
-                Ok(p) => p,
+            let (plugin, conn_arc) = match global_state.get_plugin_and_connection(&connection_id).await {
+                Ok(result) => result,
                 Err(e) => {
                     cx.update(|cx| {
-                        Self::update_status(&status_msg, format!("Failed to get plugin: {}", e), cx);
-                    }).ok();
-                    return;
-                }
-            };
-
-            let conn_arc = match global_state
-                .connection_pool
-                .get_connection(config.clone(), &global_state.db_manager)
-                .await
-            {
-                Ok(c) => c,
-                Err(e) => {
-                    cx.update(|cx| {
-                        Self::update_status(&status_msg, format!("Connection failed: {}", e), cx);
+                        Self::update_status(&status_msg, format!("Failed to get connection: {}", e), cx);
                     }).ok();
                     return;
                 }
@@ -243,7 +230,7 @@ impl Clone for TableDataTabContent {
         Self {
             database_name: self.database_name.clone(),
             table_name: self.table_name.clone(),
-            config: self.config.clone(),
+            connection_id: self.connection_id.clone(),
             table: self.table.clone(),
             status_msg: self.status_msg.clone(),
             focus_handle: self.focus_handle.clone(),

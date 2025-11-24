@@ -59,7 +59,7 @@ impl DatabaseEventHandler {
                     let config = conn_info_clone.to_db_connection();
                     let sql_editor = SqlEditorTabContent::new_with_config(
                         format!("{} - Query", database),
-                        config,
+                        config.id,
                         Some(database.clone()),
                         window,
                         cx,
@@ -88,7 +88,7 @@ impl DatabaseEventHandler {
                                 let table_data = TableDataTabContent::new(
                                     database_clone,
                                     table_clone,
-                                    config,
+                                    config.id,
                                     window,
                                     cx,
                                 );
@@ -115,7 +115,7 @@ impl DatabaseEventHandler {
                                 let view_data = TableDataTabContent::new(
                                     database_clone,
                                     view_clone,
-                                    config,
+                                    config.id,
                                     window,
                                     cx,
                                 );
@@ -142,7 +142,8 @@ impl DatabaseEventHandler {
                                 let table_designer = TableDesignerView::edit_table(
                                     database_clone,
                                     table_clone,
-                                    config,
+                                    config.id,
+                                    config.database_type,
                                     window,
                                     cx,
                                 );
@@ -162,7 +163,7 @@ impl DatabaseEventHandler {
                     // Create data import view
                     let config = conn_info_clone.to_db_connection();
                     let import_view = DataImportView::new(
-                        config,
+                        config.id,
                         database.clone(),
                         window,
                         cx,
@@ -189,7 +190,7 @@ impl DatabaseEventHandler {
                     // Create data export view
                     let config = conn_info_clone.to_db_connection();
                     let export_view = DataExportView::new(
-                        config,
+                        config.id,
                         database.clone(),
                         window,
                         cx,
@@ -544,7 +545,8 @@ impl DatabaseTabContent {
                         tab_container.update(cx, |container, cx| {
                             let table_designer = TableDesignerView::new_table(
                                 database,
-                                config,
+                                config.id,
+                                config.database_type,
                                 window,
                                 cx,
                             );
