@@ -3,7 +3,7 @@ use gpui::App;
 pub mod tab_container;
 pub mod themes;
 pub mod storage;
-mod gpui_tokio;
+pub mod gpui_tokio;
 
 
 

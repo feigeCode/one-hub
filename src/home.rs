@@ -42,23 +42,30 @@ impl HomePage {
     fn load_connections(&mut self, cx: &mut Context<Self>) {
         let storage = cx.global::<GlobalStorageState>().storage.clone();
 
-        cx.spawn(async move |this, cx| {
-            let result = async {
-                let repo = storage.get::<ConnectionRepository>().await
-                    .ok_or_else(|| anyhow::anyhow!("ConnectionRepository not found"))?;
-                let pool = storage.get_pool().await?;
-                repo.list(&pool).await
-            }.await;
+        let task = core::gpui_tokio::Tokio::spawn(cx, async move {
+            let repo = storage.get::<ConnectionRepository>().await
+                .ok_or_else(|| anyhow::anyhow!("ConnectionRepository not found"))?;
+            let pool = storage.get_pool().await?;
+            let result: anyhow::Result<Vec<StoredConnection>> = repo.list(&pool).await;
+            result
+        });
 
-            match result {
-                Ok(connections) => {
-                    this.update(cx, |this, cx| {
-                        this.connections = connections;
-                        cx.notify();
-                    }).ok();
+        cx.spawn(async move |this, cx| {
+            let task_result = task.await;
+            match task_result {
+                Ok(result) => match result {
+                    Ok(connections) => {
+                        _ = this.update(cx, |this, cx| {
+                            this.connections = connections;
+                            cx.notify();
+                        });
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to load connections: {}", e);
+                    }
                 }
                 Err(e) => {
-                    tracing::error!("Failed to load connections: {}", e);
+                    tracing::error!("Task join error: {}", e);
                 }
             }
         }).detach();
@@ -147,25 +154,32 @@ impl HomePage {
 
         let storage = cx.global::<GlobalStorageState>().storage.clone();
 
-        cx.spawn(async move |this, cx| {
-            let result = async {
-                let repo = storage.get::<ConnectionRepository>().await
-                    .ok_or_else(|| anyhow::anyhow!("ConnectionRepository not found"))?;
-                let pool = storage.get_pool().await?;
-                repo.insert(&pool, &mut stored).await?;
-                Ok::<StoredConnection, anyhow::Error>(stored)
-            }.await;
+        let task = core::gpui_tokio::Tokio::spawn(cx, async move {
+            let repo = storage.get::<ConnectionRepository>().await
+                .ok_or_else(|| anyhow::anyhow!("ConnectionRepository not found"))?;
+            let pool = storage.get_pool().await?;
+            repo.insert(&pool, &mut stored).await?;
+            let result: anyhow::Result<StoredConnection> = Ok(stored);
+            result
+        });
 
-            match result {
-                Ok(saved_conn) => {
-                    this.update(cx, |this, cx| {
-                        this.connections.push(saved_conn);
-                        this.connection_form = None;
-                        cx.notify();
-                    }).ok();
+        cx.spawn(async move |this, cx| {
+            let task_result = task.await;
+            match task_result {
+                Ok(result) => match result {
+                    Ok(saved_conn) => {
+                        _ = this.update(cx, |this, cx| {
+                            this.connections.push(saved_conn);
+                            this.connection_form = None;
+                            cx.notify();
+                        });
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to save connection: {}", e);
+                    }
                 }
                 Err(e) => {
-                    tracing::error!("Failed to save connection: {}", e);
+                    tracing::error!("Task join error: {}", e);
                 }
             }
         }).detach();
