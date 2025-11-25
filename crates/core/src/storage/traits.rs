@@ -1,47 +1,49 @@
+use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::Result;
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
+use gpui::SharedString;
+use sqlx::SqlitePool;
 
-/// Generic storage trait for CRUD operations
-#[async_trait]
-pub trait Storage<T>: Send + Sync
-where
-    T: Serialize + for<'de> Deserialize<'de> + Send + Sync,
-{
-    /// Insert a new record
-    async fn insert(&self, item: &T) -> Result<i64>;
+/// Repository trait - each entity implements its own CRUD operations
+/// 
 
-    /// Update an existing record by ID
-    async fn update(&self, id: i64, item: &T) -> Result<()>;
-
-    /// Delete a record by ID
-    async fn delete(&self, id: i64) -> Result<()>;
-
-    /// Get a record by ID
-    async fn get(&self, id: i64) -> Result<Option<T>>;
-
-    /// Get all records
-    async fn list(&self) -> Result<Vec<T>>;
-
-    /// Clear all records
-    async fn clear(&self) -> Result<()>;
+pub trait Entity: Send + Sync {
+    
+    fn id(&self) -> Option<i64>;
+    
+    fn created_at(&self) -> i64;
+    
+    fn updated_at(&self) -> i64;
 }
 
-/// Trait for custom queries
-#[async_trait]
-pub trait Queryable<T>: Send + Sync
-where
-    T: Send + Sync,
-{
-    /// Find records by a specific field value
-    async fn find_by(&self, field: &str, value: &str) -> Result<Vec<T>>;
 
-    /// Find one record by a specific field value
-    async fn find_one_by(&self, field: &str, value: &str) -> Result<Option<T>>;
+#[async_trait]
+pub trait Repository: Send + Sync {
+    type Entity: Entity;
+
+    fn entity_type(&self) -> SharedString;
+    
+    /// Create table schema
+    async fn create_table(&self, pool: &SqlitePool) -> Result<()>;
+
+    /// Insert a new record
+    async fn insert(&self, pool: &SqlitePool, item: &mut Self::Entity) -> Result<i64>;
+
+    /// Update an existing record
+    async fn update(&self, pool: &SqlitePool, item: &Self::Entity) -> Result<()>;
+
+    /// Delete a record by ID
+    async fn delete(&self, pool: &SqlitePool, id: i64) -> Result<()>;
+
+    /// Get a record by ID
+    async fn get(&self, pool: &SqlitePool, id: i64) -> Result<Option<Self::Entity>>;
+
+    /// List all records
+    async fn list(&self, pool: &SqlitePool) -> Result<Vec<Self::Entity>>;
 
     /// Count records
-    async fn count(&self) -> Result<i64>;
+    async fn count(&self, pool: &SqlitePool) -> Result<i64>;
 
-    /// Check if a record exists
-    async fn exists(&self, id: i64) -> Result<bool>;
+    /// Check if exists
+    async fn exists(&self, pool: &SqlitePool, id: i64) -> Result<bool>;
 }

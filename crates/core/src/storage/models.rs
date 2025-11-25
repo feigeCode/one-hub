@@ -1,6 +1,7 @@
-use serde::{Deserialize, Serialize};
 use db::{DatabaseType, DbConnectionConfig};
 use gpui_component::IconName;
+use serde::{Deserialize, Serialize};
+use crate::storage::traits::Entity;
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum ConnectionType {
@@ -40,7 +41,7 @@ pub struct StoredConnection {
     pub id: Option<i64>,
     pub name: String,
     pub db_type: DatabaseType,
-    pub connection_type: ConnectionType ,
+    pub connection_type: ConnectionType,
     pub host: String,
     pub port: u16,
     pub username: String,
@@ -50,6 +51,20 @@ pub struct StoredConnection {
     pub created_at: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<i64>,
+}
+
+impl Entity for StoredConnection {
+    fn id(&self) -> Option<i64> {
+        self.id
+    }
+
+    fn created_at(&self) -> i64 {
+        self.created_at.unwrap()
+    }
+
+    fn updated_at(&self) -> i64 {
+        self.updated_at.unwrap()
+    }
 }
 
 impl StoredConnection {
@@ -105,5 +120,13 @@ impl KeyValue {
             created_at: None,
             updated_at: None,
         }
+    }
+}
+
+pub fn parse_db_type(s: &str) -> DatabaseType {
+    match s {
+        "MySQL" => DatabaseType::MySQL,
+        "PostgreSQL" => DatabaseType::PostgreSQL,
+        _ => DatabaseType::MySQL,
     }
 }

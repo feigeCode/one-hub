@@ -1,12 +1,10 @@
 use crate::home::HomeTabContent;
 use core::tab_container::{TabContainer, TabItem};
-use core::themes;
 use gpui::{div, px, App, AppContext, Context, Entity, Hsla, IntoElement, KeyBinding, ParentElement, Render, Styled, Window};
 use gpui_component::dock::{ClosePanel, ToggleZoom};
 use gpui_component::{ActiveTheme, Root};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
-use core::connection_store::ConnectionStore;
 
 pub fn init(cx: &mut App) {
 
@@ -19,7 +17,7 @@ pub fn init(cx: &mut App) {
         .init();
 
     gpui_component::init(cx);
-    themes::init(cx);
+    core::init(cx);
     cx.bind_keys(vec![
         KeyBinding::new("shift-escape", ToggleZoom, None),
         KeyBinding::new("ctrl-w", ClosePanel, None),
@@ -34,10 +32,6 @@ pub struct OneHupApp {
 
 impl OneHupApp {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        // 从存储加载连接
-        let connection_store = ConnectionStore::new().expect("Failed to create connection store");
-        let stored_connections = connection_store.load_connections().unwrap_or_else(|_| vec![]);
-
         // 创建标签容器，根据平台设置 padding
         let tab_container = cx.new(|cx| {
             let mut container = TabContainer::new(window, cx)
@@ -57,7 +51,7 @@ impl OneHupApp {
 
         // 添加主页标签
         tab_container.update(cx, |tc, cx| {
-            let home_tab = TabItem::new("home", HomeTabContent::new(stored_connections, tab_container.clone(), window, cx));
+            let home_tab = TabItem::new("home", HomeTabContent::new(tab_container.clone(), window, cx));
             tc.add_and_activate_tab(home_tab, cx);
         });
 

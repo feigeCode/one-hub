@@ -60,6 +60,18 @@ impl GlobalTokio {
 pub struct Tokio {}
 
 impl Tokio {
+
+    /// Runs an async future synchronously using Tokio's runtime.
+    /// This blocks the current thread until the future completes.
+    pub fn block_on<F, R>(cx: &App, f: F) -> R
+    where
+        F: Future<Output = R>,
+    {
+        cx.read_global(|tokio: &GlobalTokio, _| {
+            let handle = tokio.runtime.handle().clone();
+            handle.block_on(f)
+        })
+    }
     /// Spawns the given future on Tokio's thread pool, and returns it via a GPUI task
     /// Note that the Tokio task will be cancelled if the GPUI task is dropped
     pub fn spawn<C, Fut, R>(cx: &C, f: Fut) -> C::Result<Task<Result<R, JoinError>>>

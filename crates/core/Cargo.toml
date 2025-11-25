@@ -16,3 +16,4 @@ dirs.workspace = true
 gpui.workspace = true
 db.workspace = true
 gpui-component.workspace = true
+uuid = { version = "1.18.1", features = ["v4"] }

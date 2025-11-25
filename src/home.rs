@@ -1,17 +1,21 @@
 use std::any::Any;
+
 use anyhow::Error;
 use gpui::{div, px, AnyElement, App, AppContext, Context, Entity, FontWeight, Hsla, InteractiveElement, IntoElement, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Window};
 use gpui::prelude::FluentBuilder;
-use rust_i18n::t;
-use gpui_component::{button::Button, h_flex, v_flex, ActiveTheme, IconName, Selectable, ThemeMode};
-use core::connection_store::{ConnectionStore};
-use core::storage::{StoredConnection, ConnectionType};
-use db_view::database_tab::DatabaseTabContent;
-use crate::setting_tab::SettingsTabContent;
-use core::themes::SwitchThemeMode;
-use db::{ DatabaseType, DbConnectionConfig};
-use db_view::db_connection_form::{DbConnectionForm, DbConnectionFormEvent, DbFormConfig};
+use gpui_component::{
+    button::Button, h_flex, v_flex, ActiveTheme, IconName, Selectable, ThemeMode,
+};
+
+use core::storage::{ConnectionRepository, ConnectionType, GlobalStorageState, StoredConnection};
+use core::storage::traits::Repository;
 use core::tab_container::{TabContainer, TabContent, TabContentType, TabItem};
+use core::themes::SwitchThemeMode;
+use db::{DatabaseType, DbConnectionConfig};
+use db_view::database_tab::DatabaseTabContent;
+use db_view::db_connection_form::{DbConnectionForm, DbConnectionFormEvent, DbFormConfig};
+
+use crate::setting_tab::SettingsTabContent;
 
 // HomePage Entity - 管理 home 页面的所有状态
 pub struct HomePage {
@@ -19,19 +23,45 @@ pub struct HomePage {
     connections: Vec<StoredConnection>,
     tab_container: Entity<TabContainer>,
     connection_form: Option<Entity<DbConnectionForm>>,
-    connection_store: ConnectionStore,
 }
 
 impl HomePage {
-    pub fn new(connections: Vec<StoredConnection>, tab_container: Entity<TabContainer>) -> Self {
-        let connection_store = ConnectionStore::new().expect("Failed to create connection store");
-        Self {
+    pub fn new(tab_container: Entity<TabContainer>, _window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let mut page = Self {
             selected_filter: ConnectionType::All,
-            connections,
+            connections: Vec::new(),
             tab_container,
             connection_form: None,
-            connection_store,
-        }
+        };
+
+        // 异步加载连接列表
+        page.load_connections(cx);
+        page
+    }
+
+    fn load_connections(&mut self, cx: &mut Context<Self>) {
+        let storage = cx.global::<GlobalStorageState>().storage.clone();
+
+        cx.spawn(async move |this, cx| {
+            let result = async {
+                let repo = storage.get::<ConnectionRepository>().await
+                    .ok_or_else(|| anyhow::anyhow!("ConnectionRepository not found"))?;
+                let pool = storage.get_pool().await?;
+                repo.list(&pool).await
+            }.await;
+
+            match result {
+                Ok(connections) => {
+                    this.update(cx, |this, cx| {
+                        this.connections = connections;
+                        cx.notify();
+                    }).ok();
+                }
+                Err(e) => {
+                    tracing::error!("Failed to load connections: {}", e);
+                }
+            }
+        }).detach();
     }
 
     fn show_connection_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -101,8 +131,7 @@ impl HomePage {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // 保存到存储
-        let stored = StoredConnection {
+        let mut stored = StoredConnection {
             id: None,
             name: config.name.clone(),
             db_type: config.database_type.clone(),
@@ -115,19 +144,31 @@ impl HomePage {
             created_at: None,
             updated_at: None,
         };
-        let clone_stored = stored.clone();
-        match self.connection_store.save_connection(stored) {
-            Ok(_) => {
-                self.connections.push(clone_stored);
 
-                // 关闭表单
-                self.connection_form = None;
-                cx.notify();
+        let storage = cx.global::<GlobalStorageState>().storage.clone();
+
+        cx.spawn(async move |this, cx| {
+            let result = async {
+                let repo = storage.get::<ConnectionRepository>().await
+                    .ok_or_else(|| anyhow::anyhow!("ConnectionRepository not found"))?;
+                let pool = storage.get_pool().await?;
+                repo.insert(&pool, &mut stored).await?;
+                Ok::<StoredConnection, anyhow::Error>(stored)
+            }.await;
+
+            match result {
+                Ok(saved_conn) => {
+                    this.update(cx, |this, cx| {
+                        this.connections.push(saved_conn);
+                        this.connection_form = None;
+                        cx.notify();
+                    }).ok();
+                }
+                Err(e) => {
+                    tracing::error!("Failed to save connection: {}", e);
+                }
             }
-            Err(e) => {
-                tracing::error!("Failed to save connection: {}", e);
-            }
-        }
+        }).detach();
     }
 
     pub fn add_settings_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -392,8 +433,8 @@ pub struct HomeTabContent {
 }
 
 impl HomeTabContent {
-    pub fn new(connections: Vec<StoredConnection>, tab_container: Entity<TabContainer>, window: &mut Window, cx: &mut App) -> Self {
-        let home_page = cx.new(|_cx| HomePage::new(connections, tab_container));
+    pub fn new(tab_container: Entity<TabContainer>, window: &mut Window, cx: &mut App) -> Self {
+        let home_page = cx.new(|cx| HomePage::new(tab_container, window, cx));
         Self {
             home_page,
         }
