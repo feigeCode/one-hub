@@ -7,6 +7,7 @@
 **不要修改代码格式**
 **不要修改无关文件**
 **不要修改任何代码警告**
+**当你不清楚某个API的使用时，请记得查看源码信息，对应框架的源码信息如下：**
 gpui源码目录在：/Users/hufei/RustroverProjects/zed/crates/gpui
 gpui-component每个组件的story所在目录：/Users/hufei/RustroverProjects/gpui-component/crates/story
 ## 编码规则
