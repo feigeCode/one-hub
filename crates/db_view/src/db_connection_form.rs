@@ -220,6 +220,30 @@ impl DbConnectionForm {
         }
     }
 
+    pub fn load_connection(&mut self, connection: &core::storage::StoredConnection, window: &mut Window, cx: &mut Context<Self>) {
+        // Update form values from connection
+        self.set_field_value("name", &connection.name, window, cx);
+        self.set_field_value("host", &connection.host, window, cx);
+        self.set_field_value("port", &connection.port.to_string(), window, cx);
+        self.set_field_value("username", &connection.username, window, cx);
+        self.set_field_value("password", &connection.password, window, cx);
+        if let Some(db) = &connection.database {
+            self.set_field_value("database", db, window, cx);
+        }
+    }
+
+    fn set_field_value(&mut self, field_name: &str, value: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some((idx, _)) = self.field_values.iter().enumerate().find(|(_, (name, _))| name == field_name) {
+            self.field_values[idx].1.update(cx, |v, cx| {
+                *v = value.to_string();
+                cx.notify();
+            });
+            self.field_inputs[idx].update(cx, |input, cx| {
+                input.set_value(value.to_string(), window, cx);
+            });
+        }
+    }
+
     fn get_field_value(&self, field_name: &str, cx: &App) -> String {
         self.field_values
             .iter()
@@ -422,43 +446,6 @@ impl Render for DbConnectionForm {
                                     .label("✕")
                                     .on_click(cx.listener(Self::handle_cancel)),
                             ),
-                    )
-                    .child(
-                        // Database type selector
-                        v_flex()
-                            .gap_1()
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .font_medium()
-                                    .text_color(cx.theme().foreground)
-                                    .child("Database Type"),
-                            )
-                            .child({
-                                let view = cx.entity();
-                                let db_type_label = current_db_type.as_str().to_string();
-                                DropdownButton::new("db-type-selector")
-                                    .w_full()
-                                    .button(
-                                        Button::new("db-type-button")
-                                            .label(db_type_label)
-                                            .icon(IconName::ChevronDown)
-                                    )
-                                    .dropdown_menu(move |menu, window, _cx| {
-                                        menu.item(
-                                            PopupMenuItem::new("MySQL")
-                                                .on_click(window.listener_for(&view, move |this, _, window, cx| {
-                                                    this.switch_db_type(DatabaseType::MySQL, window, cx);
-                                                }))
-                                        )
-                                        .item(
-                                            PopupMenuItem::new("PostgreSQL")
-                                                .on_click(window.listener_for(&view, move |this, _, window, cx| {
-                                                    this.switch_db_type(DatabaseType::PostgreSQL, window, cx);
-                                                }))
-                                        )
-                                    })
-                            }),
                     )
                     .child(
                         // Form fields
