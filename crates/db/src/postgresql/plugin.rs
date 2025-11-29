@@ -64,14 +64,14 @@ impl DatabasePlugin for PostgresPlugin {
         Ok(sql)
     }
 
-    fn generate_alter_database_sql(&self, request: &crate::types::AlterDatabaseRequest) -> Result<String> {
+    fn generate_alter_database_sql(&self, _request: &crate::types::AlterDatabaseRequest) -> Result<String> {
         // PostgreSQL doesn't support altering database encoding/collation after creation
         Err(anyhow::anyhow!("PostgreSQL does not support altering database encoding/collation"))
     }
 
     // === Table Operations ===
 
-    async fn list_tables(&self, connection: &dyn DbConnection, database: &str) -> Result<Vec<TableInfo>> {
+    async fn list_tables(&self, connection: &dyn DbConnection, _database: &str) -> Result<Vec<TableInfo>> {
         // Query to get all tables with their description/metadata
         // PostgreSQL stores table comments in pg_description
         let sql = "SELECT \
@@ -108,7 +108,7 @@ impl DatabasePlugin for PostgresPlugin {
         }
     }
 
-    async fn list_columns(&self, connection: &dyn DbConnection, database: &str, table: &str) -> Result<Vec<ColumnInfo>> {
+    async fn list_columns(&self, connection: &dyn DbConnection, _database: &str, table: &str) -> Result<Vec<ColumnInfo>> {
         let sql = format!(
             "SELECT column_name, data_type, is_nullable, column_default, \
              (SELECT COUNT(*) FROM information_schema.key_column_usage kcu \
@@ -142,7 +142,7 @@ impl DatabasePlugin for PostgresPlugin {
         }
     }
 
-    async fn list_indexes(&self, connection: &dyn DbConnection, database: &str, table: &str) -> Result<Vec<IndexInfo>> {
+    async fn list_indexes(&self, connection: &dyn DbConnection, _database: &str, table: &str) -> Result<Vec<IndexInfo>> {
         let sql = format!(
             "SELECT i.relname AS index_name, \
              a.attname AS column_name, \
@@ -185,8 +185,6 @@ impl DatabasePlugin for PostgresPlugin {
     }
 
     fn generate_create_table_sql(&self, request: &crate::types::CreateTableRequest) -> Result<String> {
-        use crate::plugin::DatabasePlugin;
-
         let column_defs: Vec<String> = request.columns.iter().map(|col| {
             self.build_column_definition(col, true)
         }).collect();
@@ -223,8 +221,6 @@ impl DatabasePlugin for PostgresPlugin {
     }
 
     fn generate_add_column_sql(&self, request: &crate::types::AddColumnRequest) -> Result<String> {
-        use crate::plugin::DatabasePlugin;
-
         let col_def = self.build_column_definition(&request.column, false);
         let sql = format!("ALTER TABLE \"{}\" ADD COLUMN \"{}\" {}",
             request.table_name,
@@ -296,7 +292,7 @@ impl DatabasePlugin for PostgresPlugin {
 
     // === View Operations ===
 
-    async fn list_views(&self, connection: &dyn DbConnection, database: &str) -> Result<Vec<ViewInfo>> {
+    async fn list_views(&self, connection: &dyn DbConnection, _database: &str) -> Result<Vec<ViewInfo>> {
         let sql = "SELECT table_name, view_definition FROM information_schema.views WHERE table_schema = 'public' ORDER BY table_name";
 
         let result = connection.query(sql, None, ExecOptions::default())
@@ -342,7 +338,7 @@ impl DatabasePlugin for PostgresPlugin {
 
     // === Function Operations ===
 
-    async fn list_functions(&self, connection: &dyn DbConnection, database: &str) -> Result<Vec<FunctionInfo>> {
+    async fn list_functions(&self, connection: &dyn DbConnection, _database: &str) -> Result<Vec<FunctionInfo>> {
         let sql = "SELECT routine_name, data_type FROM information_schema.routines WHERE routine_schema = 'public' AND routine_type = 'FUNCTION' ORDER BY routine_name";
 
         let result = connection.query(sql, None, ExecOptions::default())
@@ -380,7 +376,7 @@ impl DatabasePlugin for PostgresPlugin {
 
     // === Procedure Operations ===
 
-    async fn list_procedures(&self, connection: &dyn DbConnection, database: &str) -> Result<Vec<FunctionInfo>> {
+    async fn list_procedures(&self, connection: &dyn DbConnection, _database: &str) -> Result<Vec<FunctionInfo>> {
         let sql = "SELECT routine_name FROM information_schema.routines WHERE routine_schema = 'public' AND routine_type = 'PROCEDURE' ORDER BY routine_name";
 
         let result = connection.query(sql, None, ExecOptions::default())
@@ -418,7 +414,7 @@ impl DatabasePlugin for PostgresPlugin {
 
     // === Trigger Operations ===
 
-    async fn list_triggers(&self, connection: &dyn DbConnection, database: &str) -> Result<Vec<TriggerInfo>> {
+    async fn list_triggers(&self, connection: &dyn DbConnection, _database: &str) -> Result<Vec<TriggerInfo>> {
         let sql = "SELECT trigger_name, event_object_table, event_manipulation, action_timing \
                    FROM information_schema.triggers \
                    WHERE trigger_schema = 'public' \
@@ -448,7 +444,7 @@ impl DatabasePlugin for PostgresPlugin {
         Ok(request.definition.clone())
     }
 
-    fn generate_drop_trigger_sql(&self, request: &crate::types::DropTriggerRequest) -> Result<String> {
+    fn generate_drop_trigger_sql(&self, _request: &crate::types::DropTriggerRequest) -> Result<String> {
         // PostgreSQL requires table name for DROP TRIGGER
         // Since we don't have it in the request, we'll return an error
         Err(anyhow::anyhow!("PostgreSQL requires table name for DROP TRIGGER. Please use raw SQL with format: DROP TRIGGER trigger_name ON table_name"))
@@ -456,7 +452,7 @@ impl DatabasePlugin for PostgresPlugin {
 
     // === Sequence Operations ===
 
-    async fn list_sequences(&self, connection: &dyn DbConnection, database: &str) -> Result<Vec<SequenceInfo>> {
+    async fn list_sequences(&self, connection: &dyn DbConnection, _database: &str) -> Result<Vec<SequenceInfo>> {
         let sql = "SELECT sequence_name, start_value::bigint, increment::bigint, min_value::bigint, max_value::bigint \
                    FROM information_schema.sequences \
                    WHERE sequence_schema = 'public' \
@@ -555,7 +551,7 @@ impl DatabasePlugin for PostgresPlugin {
 
     // === Database Switching ===
 
-    async fn switch_db(&self, connection: &dyn DbConnection, database: &str) -> Result<SqlResult> {
+    async fn switch_db(&self, _connection: &dyn DbConnection, database: &str) -> Result<SqlResult> {
         // PostgreSQL does not support switching database on an existing connection.
         // Return a clear Exec message instructing the caller to create a new connection.
         let message = format!(

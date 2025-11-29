@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::fmt;
 
 /// SQL value type for parameter binding
@@ -71,7 +72,8 @@ pub struct DbNode {
     pub has_children: bool,
     pub children_loaded: bool,
     pub children: Vec<DbNode>,
-    pub metadata: Option<String>,
+    pub metadata: Option<HashMap<String, String>>,
+    pub connection_id: String ,
     pub parent_context: Option<String>,
 }
 
@@ -104,7 +106,7 @@ impl Ord for DbNode {
 }
 
 impl DbNode {
-    pub fn new(id: impl Into<String>, name: impl Into<String>, node_type: DbNodeType) -> Self {
+    pub fn new(id: impl Into<String>, name: impl Into<String>, node_type: DbNodeType, connection_id: String) -> Self {
         Self {
             id: id.into(),
             name: name.into(),
@@ -113,6 +115,7 @@ impl DbNode {
             children_loaded: false,
             children: Vec::new(),
             metadata: None,
+            connection_id,
             parent_context: None,
         }
     }
@@ -122,7 +125,7 @@ impl DbNode {
         self
     }
 
-    pub fn with_metadata(mut self, metadata: impl Into<String>) -> Self {
+    pub fn with_metadata(mut self, metadata: HashMap<String, String>) -> Self {
         self.metadata = Some(metadata.into());
         self
     }
@@ -299,6 +302,8 @@ pub struct DbConnectionConfig {
     pub username: String,
     pub password: String,
     pub database: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<i64>,
 }
 
 // === SQL Operation Request Objects ===

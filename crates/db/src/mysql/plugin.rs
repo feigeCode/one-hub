@@ -194,8 +194,6 @@ impl DatabasePlugin for MySqlPlugin {
     }
 
     fn generate_create_table_sql(&self, request: &crate::types::CreateTableRequest) -> Result<String> {
-        use crate::plugin::DatabasePlugin;
-
         let column_defs: Vec<String> = request.columns.iter().map(|col| {
             self.build_column_definition(col, true)
         }).collect();
@@ -235,8 +233,6 @@ impl DatabasePlugin for MySqlPlugin {
     }
 
     fn generate_add_column_sql(&self, request: &crate::types::AddColumnRequest) -> Result<String> {
-        use crate::plugin::DatabasePlugin;
-
         let col_def = self.build_column_definition(&request.column, false);
         let sql = format!("ALTER TABLE `{}`.`{}` ADD COLUMN `{}` {}",
             request.database_name,
@@ -257,8 +253,6 @@ impl DatabasePlugin for MySqlPlugin {
     }
 
     fn generate_modify_column_sql(&self, request: &crate::types::ModifyColumnRequest) -> Result<String> {
-        use crate::plugin::DatabasePlugin;
-
         let col_def = self.build_column_definition(&request.column, false);
         let sql = format!("ALTER TABLE `{}`.`{}` MODIFY COLUMN `{}` {}",
             request.database_name,

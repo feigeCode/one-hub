@@ -1,6 +1,7 @@
 use db::{DatabaseType, DbConnectionConfig};
 use gpui_component::IconName;
 use serde::{Deserialize, Serialize};
+
 use crate::storage::traits::Entity;
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -34,6 +35,49 @@ impl ConnectionType {
     }
 }
 
+/// Workspace for organizing connections
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Workspace {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<i64>,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<i64>,
+}
+
+impl Entity for Workspace {
+    fn id(&self) -> Option<i64> {
+        self.id
+    }
+
+    fn created_at(&self) -> i64 {
+        self.created_at.unwrap()
+    }
+
+    fn updated_at(&self) -> i64 {
+        self.updated_at.unwrap()
+    }
+}
+
+impl Workspace {
+    pub fn new(name: String) -> Self {
+        Self {
+            id: None,
+            name,
+            color: None,
+            icon: None,
+            created_at: None,
+            updated_at: None,
+        }
+    }
+}
+
 /// Stored database connection with ID
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoredConnection {
@@ -47,6 +91,8 @@ pub struct StoredConnection {
     pub username: String,
     pub password: String,
     pub database: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_at: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -79,6 +125,7 @@ impl StoredConnection {
             username: connection.username,
             password: connection.password,
             database: connection.database,
+            workspace_id: None,
             created_at: None,
             updated_at: None,
         }
@@ -94,6 +141,7 @@ impl StoredConnection {
             username: self.username.clone(),
             password: self.password.clone(),
             database: self.database.clone(),
+            workspace_id: self.workspace_id,
         }
     }
 }

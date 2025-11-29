@@ -36,6 +36,7 @@ impl Repository for ConnectionRepository {
                 username TEXT NOT NULL,
                 password TEXT NOT NULL,
                 database TEXT,
+                workspace_id INTEGER,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
             )
@@ -48,6 +49,10 @@ impl Repository for ConnectionRepository {
             .execute(pool)
             .await?;
 
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_connections_workspace ON connections(workspace_id)")
+            .execute(pool)
+            .await?;
+
         Ok(())
     }
 
@@ -55,8 +60,8 @@ impl Repository for ConnectionRepository {
         let now = now();
         let result = sqlx::query(
             r#"
-            INSERT INTO connections (name, db_type, connection_type, host, port, username, password, database, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO connections (name, db_type, connection_type, host, port, username, password, database, workspace_id, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&item.name)
@@ -67,6 +72,7 @@ impl Repository for ConnectionRepository {
         .bind(&item.username)
         .bind(&item.password)
         .bind(&item.database)
+        .bind(item.workspace_id)
         .bind(now)
         .bind(now)
         .execute(pool)
@@ -87,7 +93,7 @@ impl Repository for ConnectionRepository {
             r#"
             UPDATE connections 
             SET name = ?, db_type = ?, connection_type = ?, host = ?, port = ?, 
-                username = ?, password = ?, database = ?, updated_at = ?
+                username = ?, password = ?, database = ?, workspace_id = ?, updated_at = ?
             WHERE id = ?
             "#,
         )
@@ -99,6 +105,7 @@ impl Repository for ConnectionRepository {
         .bind(&item.username)
         .bind(&item.password)
         .bind(&item.database)
+        .bind(item.workspace_id)
         .bind(now)
         .bind(id)
         .execute(pool)
@@ -119,7 +126,7 @@ impl Repository for ConnectionRepository {
     async fn get(&self, pool: &SqlitePool, id: i64) -> Result<Option<Self::Entity>> {
         let row = sqlx::query(
             r#"
-            SELECT id, name, db_type, connection_type, host, port, username, password, database, created_at, updated_at
+            SELECT id, name, db_type, connection_type, host, port, username, password, database, workspace_id, created_at, updated_at
             FROM connections
             WHERE id = ?
             "#,
@@ -134,7 +141,7 @@ impl Repository for ConnectionRepository {
     async fn list(&self, pool: &SqlitePool) -> Result<Vec<Self::Entity>> {
         let rows = sqlx::query(
             r#"
-            SELECT id, name, db_type, connection_type, host, port, username, password, database, created_at, updated_at
+            SELECT id, name, db_type, connection_type, host, port, username, password, database, workspace_id, created_at, updated_at
             FROM connections
             ORDER BY updated_at DESC
             "#,
@@ -180,14 +187,33 @@ impl ConnectionRepository {
             username: row.get("username"),
             password: row.get("password"),
             database: row.get("database"),
+            workspace_id: row.get("workspace_id"),
             created_at: Some(row.get("created_at")),
             updated_at: Some(row.get("updated_at")),
         }
+    }
+
+    pub async fn list_by_workspace(&self, pool: &SqlitePool, workspace_id: Option<i64>) -> Result<Vec<StoredConnection>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id, name, db_type, connection_type, host, port, username, password, database, workspace_id, created_at, updated_at
+            FROM connections
+            WHERE workspace_id IS ? OR (? IS NULL AND workspace_id IS NULL)
+            ORDER BY updated_at DESC
+            "#,
+        )
+        .bind(workspace_id)
+        .bind(workspace_id)
+        .fetch_all(pool)
+        .await?;
+
+        Ok(rows.iter().map(|r| Self::row_to_entity(r)).collect())
     }
 }
 
 use crate::storage::ConnectionType;
 use crate::storage::manager::{now, GlobalStorageState};
+use crate::storage::Workspace;
 
 fn parse_connection_type(s: &str) -> ConnectionType {
     match s {
@@ -199,16 +225,184 @@ fn parse_connection_type(s: &str) -> ConnectionType {
     }
 }
 
+/// Repository for Workspace
+#[derive(Clone)]
+pub struct WorkspaceRepository;
+
+impl WorkspaceRepository {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+#[async_trait]
+impl Repository for WorkspaceRepository {
+    type Entity = Workspace;
+
+    fn entity_type(&self) -> SharedString {
+        SharedString::from("Workspace")
+    }
+
+    async fn create_table(&self, pool: &SqlitePool) -> Result<()> {
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS workspaces (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                color TEXT,
+                icon TEXT,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            )
+            "#,
+        )
+        .execute(pool)
+        .await?;
+
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_workspaces_name ON workspaces(name)")
+            .execute(pool)
+            .await?;
+
+        Ok(())
+    }
+
+    async fn insert(&self, pool: &SqlitePool, item: &mut Self::Entity) -> Result<i64> {
+        let now = now();
+        let result = sqlx::query(
+            r#"
+            INSERT INTO workspaces (name, color, icon, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(&item.name)
+        .bind(&item.color)
+        .bind(&item.icon)
+        .bind(now)
+        .bind(now)
+        .execute(pool)
+        .await?;
+
+        let id = result.last_insert_rowid();
+        item.id = Some(id);
+        item.created_at = Some(now);
+        item.updated_at = Some(now);
+
+        Ok(id)
+    }
+
+    async fn update(&self, pool: &SqlitePool, item: &Self::Entity) -> Result<()> {
+        let id = item.id.ok_or_else(|| anyhow::anyhow!("Cannot update without ID"))?;
+        let now = now();
+        sqlx::query(
+            r#"
+            UPDATE workspaces 
+            SET name = ?, color = ?, icon = ?, updated_at = ?
+            WHERE id = ?
+            "#,
+        )
+        .bind(&item.name)
+        .bind(&item.color)
+        .bind(&item.icon)
+        .bind(now)
+        .bind(id)
+        .execute(pool)
+        .await?;
+
+        Ok(())
+    }
+
+    async fn delete(&self, pool: &SqlitePool, id: i64) -> Result<()> {
+        // 删除工作区时，将关联的连接的 workspace_id 设为 NULL
+        sqlx::query("UPDATE connections SET workspace_id = NULL WHERE workspace_id = ?")
+            .bind(id)
+            .execute(pool)
+            .await?;
+
+        sqlx::query("DELETE FROM workspaces WHERE id = ?")
+            .bind(id)
+            .execute(pool)
+            .await?;
+
+        Ok(())
+    }
+
+    async fn get(&self, pool: &SqlitePool, id: i64) -> Result<Option<Self::Entity>> {
+        let row = sqlx::query(
+            r#"
+            SELECT id, name, color, icon, created_at, updated_at
+            FROM workspaces
+            WHERE id = ?
+            "#,
+        )
+        .bind(id)
+        .fetch_optional(pool)
+        .await?;
+
+        Ok(row.map(|r| Self::row_to_entity(&r)))
+    }
+
+    async fn list(&self, pool: &SqlitePool) -> Result<Vec<Self::Entity>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id, name, color, icon, created_at, updated_at
+            FROM workspaces
+            ORDER BY updated_at DESC
+            "#,
+        )
+        .fetch_all(pool)
+        .await?;
+
+        Ok(rows.iter().map(|r| Self::row_to_entity(r)).collect())
+    }
+
+    async fn count(&self, pool: &SqlitePool) -> Result<i64> {
+        let row = sqlx::query("SELECT COUNT(*) as count FROM workspaces")
+            .fetch_one(pool)
+            .await?;
+
+        Ok(row.get("count"))
+    }
+
+    async fn exists(&self, pool: &SqlitePool, id: i64) -> Result<bool> {
+        let row = sqlx::query("SELECT 1 FROM workspaces WHERE id = ? LIMIT 1")
+            .bind(id)
+            .fetch_optional(pool)
+            .await?;
+
+        Ok(row.is_some())
+    }
+}
+
+impl WorkspaceRepository {
+    fn row_to_entity(row: &sqlx::sqlite::SqliteRow) -> Workspace {
+        Workspace {
+            id: Some(row.get("id")),
+            name: row.get("name"),
+            color: row.get("color"),
+            icon: row.get("icon"),
+            created_at: Some(row.get("created_at")),
+            updated_at: Some(row.get("updated_at")),
+        }
+    }
+}
+
 pub fn init(cx: &mut App) {
     let storage_state = cx.global::<GlobalStorageState>();
-    let repo = ConnectionRepository::new();
+    let conn_repo = ConnectionRepository::new();
+    let workspace_repo = WorkspaceRepository::new();
+    
     let result: Result<()> = Tokio::block_on(cx, async move {
         let pool = storage_state.storage.get_pool().await?;
-        repo.create_table(&pool).await?;
-        storage_state.storage.register(repo).await?;
+        
+        workspace_repo.create_table(&pool).await?;
+        storage_state.storage.register(workspace_repo).await?;
+        
+        conn_repo.create_table(&pool).await?;
+        storage_state.storage.register(conn_repo).await?;
+        
         Ok(())
     });
     if let Err(e) = result {
-        panic!("Failed to initialize connection repository: {}", e);
+        panic!("Failed to initialize repositories: {}", e);
     }
 }

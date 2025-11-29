@@ -1,18 +1,15 @@
-use core::storage::StoredConnection;
 use core::tab_container::{TabContainer, TabContent, TabContentType, TabItem};
+use core::storage::StoredConnection;
 use std::any::Any;
-
-use crate::database_objects_tab::DatabaseObjectsPanel;
-use crate::db_tree_view::DbTreeView;
 use gpui::prelude::FluentBuilder;
-use gpui::{
-    div, px, AnyElement, App, AppContext, Context, Entity, FontWeight,
-    Hsla, IntoElement, ParentElement, SharedString, Styled, Subscription, Window,
-};
-use gpui_component::button::ButtonVariants;
+use gpui::{div, px, AnyElement, App, AppContext, Context, Entity, FontWeight, Hsla, IntoElement, ParentElement, SharedString, Styled, Subscription, Window};
 use gpui_component::resizable::{h_resizable, resizable_panel};
 use gpui_component::{h_flex, v_flex, ActiveTheme, IconName};
+use gpui_component::button::ButtonVariants;
 use uuid::Uuid;
+use db::{GlobalDbState, DbNode};
+use crate::database_objects_tab::DatabaseObjectsPanel;
+use crate::db_tree_view::DbTreeView;
 
 // Event handler for database tree view events
 struct DatabaseEventHandler {
@@ -23,7 +20,6 @@ impl DatabaseEventHandler {
     fn new(
         db_tree_view: &Entity<DbTreeView>,
         tab_container: Entity<TabContainer>,
-        connection_info: StoredConnection,
         objects_panel: Entity<DatabaseObjectsPanel>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -31,189 +27,35 @@ impl DatabaseEventHandler {
         use crate::db_tree_view::DbTreeViewEvent;
 
         let tab_container_clone = tab_container.clone();
-        let conn_info_clone = connection_info.clone();
         let objects_panel_clone = objects_panel.clone();
-        let tree_view_clone = db_tree_view.clone();
-        
+        let global_state = cx.global::<GlobalDbState>().clone();
+
         let tree_subscription = cx.subscribe_in(db_tree_view, window, move |_handler, _tree, event, window, cx| {
+            let global_state = global_state.clone();
+            let tab_container = tab_container_clone.clone();
+            let objects_panel = objects_panel_clone.clone();
+
             match event {
-                DbTreeViewEvent::NodeSelected { node_id } => {
-                    
-                    // 先从 tree 中提取节点信息
-                    let node_info = tree_view_clone.update(cx, |tree, _cx| {
-                        tree.get_node(node_id).cloned()
-                    });
-                    
-                    // 然后根据节点类型更新 objects panel
-                    if let Some(node) = node_info {
-                        let config = conn_info_clone.to_db_connection();
-                        objects_panel_clone.update(cx, |panel, cx| {
-                            panel.handle_node_selected(node_id.clone(), node.node_type, config, cx);
-                        });
-                    }
+                DbTreeViewEvent::NodeSelected { node } => {
+                    Self::handle_node_selected(node.clone(), global_state, objects_panel, cx);
                 }
-                DbTreeViewEvent::CreateNewQuery { database } => {
-                    use crate::sql_editor_view::SqlEditorTabContent;
-
-                    // Create new SQL editor with connection config
-                    let config = conn_info_clone.to_db_connection();
-                    let sql_editor = SqlEditorTabContent::new_with_config(
-                        format!("{} - Query", database),
-                        config.id,
-                        Some(database.clone()),
-                        window,
-                        cx,
-                    );
-
-                    // Add to tab container
-                    tab_container_clone.update(cx, |container, cx| {
-                        let tab_id = format!("query-{}-{}", database, Uuid::new_v4());
-                        let tab = TabItem::new(tab_id, sql_editor);
-                        container.add_and_activate_tab(tab, cx);
-                    });
+                DbTreeViewEvent::CreateNewQuery { node } => {
+                    Self::handle_create_new_query(node.clone(), global_state, tab_container, window, cx);
                 }
-                DbTreeViewEvent::OpenTableData { database, table } => {
-                    use crate::table_data_tab::TableDataTabContent;
-
-                    let tab_id = format!("table-data-{}.{}", database, table);
-                    let database_clone = database.clone();
-                    let table_clone = table.clone();
-                    let config = conn_info_clone.to_db_connection();
-
-                    // Lazy load: only create tab content if tab doesn't exist
-                    tab_container_clone.update(cx, |container, cx| {
-                        container.activate_or_add_tab_lazy(
-                            tab_id.clone(),
-                            |window, cx| {
-                                let table_data = TableDataTabContent::new(
-                                    database_clone,
-                                    table_clone,
-                                    config.id,
-                                    window,
-                                    cx,
-                                );
-                                TabItem::new(tab_id, table_data)
-                            },
-                            window,
-                            cx,
-                        );
-                    });
+                DbTreeViewEvent::OpenTableData { node } => {
+                    Self::handle_open_table_data(node.clone(), global_state, tab_container, window, cx);
                 }
-                DbTreeViewEvent::OpenViewData { database, view } => {
-                    use crate::table_data_tab::TableDataTabContent;
-
-                    let tab_id = format!("view-data-{}.{}", database, view);
-                    let database_clone = database.clone();
-                    let view_clone = view.clone();
-                    let config = conn_info_clone.to_db_connection();
-
-                    // Lazy load: only create tab content if tab doesn't exist
-                    tab_container_clone.update(cx, |container, cx| {
-                        container.activate_or_add_tab_lazy(
-                            tab_id.clone(),
-                            |window, cx| {
-                                let view_data = TableDataTabContent::new(
-                                    database_clone,
-                                    view_clone,
-                                    config.id,
-                                    window,
-                                    cx,
-                                );
-                                TabItem::new(tab_id, view_data)
-                            },
-                            window,
-                            cx,
-                        );
-                    });
+                DbTreeViewEvent::OpenViewData { node } => {
+                    Self::handle_open_view_data(node.clone(), global_state, tab_container, window, cx);
                 }
-                DbTreeViewEvent::OpenTableStructure { database, table } => {
-                    use crate::table_designer_view::TableDesignerView;
-
-                    let tab_id = format!("table-designer-{}.{}", database, table);
-                    let database_clone = database.clone();
-                    let table_clone = table.clone();
-                    let config = conn_info_clone.to_db_connection();
-
-                    // Lazy load: only create tab content if tab doesn't exist
-                    tab_container_clone.update(cx, |container, cx| {
-                        container.activate_or_add_tab_lazy(
-                            tab_id.clone(),
-                            |window, cx| {
-                                let table_designer = TableDesignerView::edit_table(
-                                    database_clone,
-                                    table_clone,
-                                    config.id,
-                                    config.database_type,
-                                    window,
-                                    cx,
-                                );
-                                TabItem::new(tab_id, table_designer.read(cx).clone())
-                            },
-                            window,
-                            cx,
-                        );
-                    });
+                DbTreeViewEvent::OpenTableStructure { node } => {
+                    Self::handle_open_table_structure(node.clone(), global_state, tab_container, window, cx);
                 }
-                DbTreeViewEvent::ImportData { database, table: _ } => {
-                    use crate::data_import_view::DataImportView;
-                    use gpui_component::WindowExt;
-
-                    eprintln!("Opening import dialog for database: {}", database);
-                    
-                    // Create data import view
-                    let config = conn_info_clone.to_db_connection();
-                    let import_view = DataImportView::new(
-                        config.id,
-                        database.clone(),
-                        window,
-                        cx,
-                    );
-                    
-                    eprintln!("Import view created, opening dialog...");
-                    
-                    // Open as dialog
-                    window.open_dialog(cx, move |dialog, _window, _cx| {
-                        eprintln!("Dialog builder called");
-                        dialog
-                            .title("Import Data")
-                            .child(import_view.clone())
-                            .width(px(800.0))
-                            .on_cancel(|_, _window, _cx| true)
-                    });
-                    
-                    eprintln!("Dialog opened");
+                DbTreeViewEvent::ImportData { node } => {
+                    Self::handle_import_data(node.clone(), global_state, window, cx);
                 }
-                DbTreeViewEvent::ExportData { database, tables } => {
-                    use crate::data_export_view::DataExportView;
-                    use gpui_component::WindowExt;
-
-                    // Create data export view
-                    let config = conn_info_clone.to_db_connection();
-                    let export_view = DataExportView::new(
-                        config.id,
-                        database.clone(),
-                        window,
-                        cx,
-                    );
-
-                    // Pre-fill tables if provided
-                    if !tables.is_empty() {
-                        let tables_str = tables.join(", ");
-                        export_view.update(cx, |view, cx| {
-                            view.tables.update(cx, |state, cx| {
-                                state.set_value(tables_str, window, cx);
-                            });
-                        });
-                    }
-                    
-                    // Open as dialog
-                    window.open_dialog(cx, move |dialog, _window, _cx| {
-                        dialog
-                            .title("Export Data")
-                            .child(export_view.clone())
-                            .width(px(800.0))
-                            .on_cancel(|_, _window, _cx| true)
-                    });
+                DbTreeViewEvent::ExportData { node } => {
+                    Self::handle_export_data(node.clone(), global_state, window, cx);
                 }
             }
         });
@@ -222,11 +64,301 @@ impl DatabaseEventHandler {
             _tree_subscription: tree_subscription,
         }
     }
+
+    /// 处理节点选中事件
+    fn handle_node_selected(
+        node: DbNode,
+        global_state: GlobalDbState,
+        objects_panel: Entity<DatabaseObjectsPanel>,
+        cx: &mut App,
+    ) {
+        let node_id = node.id.clone();
+        let node_type = node.node_type.clone();
+        let connection_id = node.connection_id.clone();
+
+        let config = core::gpui_tokio::Tokio::block_on(cx, async move {
+            global_state.get_config(&connection_id).await
+        });
+
+        if let Some(config) = config {
+            objects_panel.update(cx, |panel, cx| {
+                panel.handle_node_selected(node_id, node_type, config, cx);
+            });
+        }
+    }
+
+    /// 处理创建新查询事件
+    fn handle_create_new_query(
+        node: DbNode,
+        global_state: GlobalDbState,
+        tab_container: Entity<TabContainer>,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        use crate::sql_editor_view::SqlEditorTabContent;
+
+        let connection_id = node.connection_id.clone();
+        // 获取数据库名：如果是数据库节点则用 name，否则用 parent_context
+        let database = node.parent_context.clone().unwrap_or_else(|| node.name.clone());
+
+        let config = core::gpui_tokio::Tokio::block_on(cx, async move {
+            global_state.get_config(&connection_id).await
+        });
+
+        if let Some(config) = config {
+            let sql_editor = SqlEditorTabContent::new_with_config(
+                format!("{} - Query", database),
+                config.id.clone(),
+                Some(database.clone()),
+                window,
+                cx,
+            );
+
+            tab_container.update(cx, |container, cx| {
+                let tab_id = format!("query-{}-{}", database, Uuid::new_v4());
+                let tab = TabItem::new(tab_id, sql_editor);
+                container.add_and_activate_tab(tab, cx);
+            });
+        }
+    }
+
+    /// 处理打开表数据事件
+    fn handle_open_table_data(
+        node: DbNode,
+        global_state: GlobalDbState,
+        tab_container: Entity<TabContainer>,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        use crate::table_data_tab::TableDataTabContent;
+
+        let connection_id = node.connection_id.clone();
+        let table = node.name.clone();
+        let metadata = &node.metadata.unwrap();
+        let database = metadata.get("database").unwrap();
+        let tab_id = format!("table-data-{}.{}", database, table);
+
+        let config = core::gpui_tokio::Tokio::block_on(cx, async move {
+            global_state.get_config(&connection_id).await
+        });
+        if let Some(config) = config {
+            let database_clone = database.clone();
+            let table_clone = table.clone();
+            let config_id = config.id.clone();
+            let tab_id_clone = tab_id.clone();
+
+            tab_container.update(cx, |container, cx| {
+                container.activate_or_add_tab_lazy(
+                    tab_id,
+                    move |window, cx| {
+                        let table_data = TableDataTabContent::new(
+                            database_clone,
+                            table_clone,
+                            config_id,
+                            window,
+                            cx,
+                        );
+                        TabItem::new(tab_id_clone, table_data)
+                    },
+                    window,
+                    cx,
+                );
+            });
+        }
+    }
+
+    /// 处理打开视图数据事件
+    fn handle_open_view_data(
+        node: DbNode,
+        global_state: GlobalDbState,
+        tab_container: Entity<TabContainer>,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        use crate::table_data_tab::TableDataTabContent;
+
+        let connection_id = node.connection_id.clone();
+        let view = node.name.clone();
+        let metadata = &node.metadata.unwrap();
+        let database = metadata.get("database").unwrap();
+        let tab_id = format!("view-data-{}.{}", database, view);
+
+        let config = core::gpui_tokio::Tokio::block_on(cx, async move {
+            global_state.get_config(&connection_id).await
+        });
+
+        if let Some(config) = config {
+            let database_clone = database.clone();
+            let view_clone = view.clone();
+            let config_id = config.id.clone();
+            let tab_id_clone = tab_id.clone();
+
+            tab_container.update(cx, |container, cx| {
+                container.activate_or_add_tab_lazy(
+                    tab_id,
+                    move |window, cx| {
+                        let view_data = TableDataTabContent::new(
+                            database_clone,
+                            view_clone,
+                            config_id,
+                            window,
+                            cx,
+                        );
+                        TabItem::new(tab_id_clone, view_data)
+                    },
+                    window,
+                    cx,
+                );
+            });
+        }
+    }
+
+    /// 处理打开表结构事件
+    fn handle_open_table_structure(
+        node: DbNode,
+        global_state: GlobalDbState,
+        tab_container: Entity<TabContainer>,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        use crate::table_designer_view::TableDesignerView;
+
+        let connection_id = node.connection_id.clone();
+        let table = node.name.clone();
+        let metadata = &node.metadata.unwrap();
+        let database = metadata.get("database").unwrap();
+        let tab_id = format!("table-designer-{}.{}", database, table);
+
+        let config = core::gpui_tokio::Tokio::block_on(cx, async move {
+            global_state.get_config(&connection_id).await
+        });
+
+        if let Some(config) = config {
+            let database_clone = database.clone();
+            let table_clone = table.clone();
+            let config_id = config.id.clone();
+            let database_type = config.database_type;
+            let tab_id_clone = tab_id.clone();
+
+            tab_container.update(cx, |container, cx| {
+                container.activate_or_add_tab_lazy(
+                    tab_id,
+                    move |window, cx| {
+                        let table_designer = TableDesignerView::edit_table(
+                            database_clone,
+                            table_clone,
+                            config_id,
+                            database_type,
+                            window,
+                            cx,
+                        );
+                        TabItem::new(tab_id_clone, table_designer.read(cx).clone())
+                    },
+                    window,
+                    cx,
+                );
+            });
+        }
+    }
+
+    /// 处理导入数据事件
+    fn handle_import_data(
+        node: DbNode,
+        global_state: GlobalDbState,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        use crate::data_import_view::DataImportView;
+        use gpui_component::WindowExt;
+
+        let connection_id = node.connection_id.clone();
+        // 获取数据库名：如果是数据库节点则用 name，否则用 parent_context
+        let database = node.parent_context.clone().unwrap_or_else(|| node.name.clone());
+
+        eprintln!("Opening import dialog for database: {}", database);
+
+        let config = core::gpui_tokio::Tokio::block_on(cx, async move {
+            global_state.get_config(&connection_id).await
+        });
+
+        if let Some(config) = config {
+            let import_view = DataImportView::new(
+                config.id,
+                database.clone(),
+                window,
+                cx,
+            );
+
+            eprintln!("Import view created, opening dialog...");
+
+            window.open_dialog(cx, move |dialog, _window, _cx| {
+                eprintln!("Dialog builder called");
+                dialog
+                    .title("Import Data")
+                    .child(import_view.clone())
+                    .width(px(800.0))
+                    .on_cancel(|_, _window, _cx| true)
+            });
+
+            eprintln!("Dialog opened");
+        }
+    }
+
+    /// 处理导出数据事件
+    fn handle_export_data(
+        node: DbNode,
+        global_state: GlobalDbState,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        use crate::data_export_view::DataExportView;
+        use gpui_component::WindowExt;
+
+        let connection_id = node.connection_id.clone();
+        // 获取数据库名：如果是数据库节点则用 name，否则用 parent_context
+        let database = node.parent_context.clone().unwrap_or_else(|| node.name.clone());
+        // 如果是表节点，预填表名
+        let table_name = if node.node_type == db::DbNodeType::Table {
+            Some(node.name.clone())
+        } else {
+            None
+        };
+
+        let config = core::gpui_tokio::Tokio::block_on(cx, async move {
+            global_state.get_config(&connection_id).await
+        });
+
+        if let Some(config) = config {
+            let export_view = DataExportView::new(
+                config.id,
+                database.clone(),
+                window,
+                cx,
+            );
+
+            // 如果有表名则预填
+            if let Some(table) = table_name {
+                export_view.update(cx, |view, cx| {
+                    view.tables.update(cx, |state, cx| {
+                        state.set_value(table, window, cx);
+                    });
+                });
+            }
+
+            window.open_dialog(cx, move |dialog, _window, _cx| {
+                dialog
+                    .title("Export Data")
+                    .child(export_view.clone())
+                    .width(px(800.0))
+                    .on_cancel(|_, _window, _cx| true)
+            });
+        }
+    }
 }
 
 // Database connection tab content - using TabContainer architecture
 pub struct DatabaseTabContent {
-    connection_info: StoredConnection,
+    connections: Vec<StoredConnection>,
     tab_container: Entity<TabContainer>,
     db_tree_view: Entity<DbTreeView>,
     objects_panel: Entity<DatabaseObjectsPanel>,
@@ -236,10 +368,10 @@ pub struct DatabaseTabContent {
 }
 
 impl DatabaseTabContent {
-    pub fn new(stored_conn: StoredConnection, window: &mut Window, cx: &mut App) -> Self {
+    pub fn new(connections: Vec<StoredConnection>, window: &mut Window, cx: &mut App) -> Self {
         // Create database tree view
         let db_tree_view = cx.new(|cx| {
-            DbTreeView::new(stored_conn.clone(), window, cx)
+            DbTreeView::new(&connections, window, cx)
         });
 
         // Create tab container
@@ -272,122 +404,48 @@ impl DatabaseTabContent {
             container.add_and_activate_tab(tab, cx);
         });
 
-        let status_msg = cx.new(|_| "Connecting...".to_string());
-        let is_connected = cx.new(|_| false);
+        let status_msg = cx.new(|_| "Ready".to_string());
+        let is_connected = cx.new(|_| true);
 
         // Create event handler to handle tree view events
         let event_handler = cx.new(|cx| {
-            DatabaseEventHandler::new(&db_tree_view, tab_container.clone(), stored_conn.clone(), objects_panel.clone(), window, cx)
+            DatabaseEventHandler::new(&db_tree_view, tab_container.clone(), objects_panel.clone(), window, cx)
         });
 
-        let instance = Self {
-            connection_info: stored_conn.clone(),
+        // 注册连接配置到 GlobalDbState，然后自动连接
+        let global_state = cx.global::<GlobalDbState>().clone();
+        let connections_clone = connections.clone();
+
+        cx.spawn(async move |_cx| {
+            // 先注册所有连接
+            for conn in &connections_clone {
+                let db_config = conn.to_db_connection();
+                let _ = global_state.register_connection(db_config).await;
+            }
+        }).detach();
+
+        Self {
+            connections: connections.clone(),
             tab_container,
             db_tree_view,
             objects_panel,
             status_msg,
             is_connected,
             event_handler: Some(event_handler),
-        };
-
-        // Automatically start connection
-        instance.start_connection(stored_conn, cx);
-
-        instance
-    }
-
-    fn start_connection(&self, conn: StoredConnection, cx: &mut App) {
-        let status_msg = self.status_msg.clone();
-        let is_connected = self.is_connected.clone();
-        let db_tree_view = self.db_tree_view.clone();
-        let objects_panel = self.objects_panel.clone();
-
-        let global_state = cx.global::<db::GlobalDbState>().clone();
-        let stored_conn_id = conn.id.unwrap_or(0).to_string();
-
-        cx.spawn(async move |cx| {
-            let config = db::DbConnectionConfig {
-                id: stored_conn_id.clone(),
-                database_type: conn.db_type,
-                name: conn.name.clone(),
-                host: conn.host.clone(),
-                port: conn.port,
-                username: conn.username.clone(),
-                password: conn.password.clone(),
-                database: conn.database.clone(),
-            };
-
-            let plugin = match global_state.db_manager.get_plugin(&config.database_type) {
-                Ok(p) => p,
-                Err(e) => {
-                    cx.update(|cx| {
-                        status_msg.update(cx, |s, cx| {
-                            *s = format!("Failed to get plugin: {}", e);
-                            cx.notify();
-                        });
-                    })
-                        .ok();
-                    return;
-                }
-            };
-
-            match global_state.connection_pool.get_connection(config.clone(), &global_state.db_manager).await {
-                Ok(conn_arc) => {
-                    // Load databases and expand first one
-                    let first_database =  {
-                        let conn = conn_arc.read().await;
-                        plugin.list_databases(&**conn).await.ok()
-                            .and_then(|dbs| dbs.first().cloned())
-                    };
-
-                    cx.update(|cx| {
-                        is_connected.update(cx, |flag, cx| {
-                            *flag = true;
-                            cx.notify();
-                        });
-
-                        status_msg.update(cx, |s, cx| {
-                            *s = format!("Connected to {}", config.name);
-                            cx.notify();
-                        });
-
-                        db_tree_view.update(cx, |tree, cx| {
-                            tree.set_connection_name(config.name.clone());
-                            // 直接刷新树以加载数据库列表
-                            tree.refresh_tree(cx);
-                        });
-
-                        // Load objects for first database
-                        if let Some(db) = first_database {
-                            objects_panel.update(cx, |panel, cx| {
-                                panel.handle_node_selected(
-                                    db.clone(),
-                                    db::types::DbNodeType::Database,
-                                    config.clone(),
-                                    cx
-                                );
-                            });
-                        }
-                    })
-                        .ok();
-                }
-                Err(e) => {
-                    cx.update(|cx| {
-                        status_msg.update(cx, |s, cx| {
-                            *s = format!("Connection failed: {}", e);
-                            cx.notify();
-                        });
-                    })
-                        .ok();
-                }
-            }
-        })
-            .detach();
+        }
     }
 
     fn render_connection_status(&self, cx: &mut App) -> AnyElement {
         let status_text = self.status_msg.read(cx).clone();
         let is_error = status_text.contains("Failed") || status_text.contains("failed");
+
+        // 获取第一个连接信息用于显示
+        let first_conn = self.connections.first();
+        let conn_name = first_conn.map(|c| c.name.clone()).unwrap_or_else(|| "Unknown".to_string());
+        let conn_host = first_conn.map(|c| c.host.clone()).unwrap_or_default();
+        let conn_port = first_conn.map(|c| c.port).unwrap_or(0);
+        let conn_username = first_conn.map(|c| c.username.clone()).unwrap_or_default();
+        let conn_database = first_conn.and_then(|c| c.database.clone());
 
         v_flex()
             .size_full()
@@ -431,7 +489,7 @@ impl DatabaseTabContent {
                 div()
                     .text_xl()
                     .font_weight(FontWeight::BOLD)
-                    .child(format!("Database Connection: {}", self.connection_info.name))
+                    .child(format!("Database Connection: {}", conn_name))
             )
             .child(
                 v_flex()
@@ -447,7 +505,7 @@ impl DatabaseTabContent {
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .child("Host:")
                             )
-                            .child(self.connection_info.host.clone())
+                            .child(conn_host)
                     )
                     .child(
                         h_flex()
@@ -457,7 +515,7 @@ impl DatabaseTabContent {
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .child("Port:")
                             )
-                            .child(format!("{}", self.connection_info.port))
+                            .child(format!("{}", conn_port))
                     )
                     .child(
                         h_flex()
@@ -467,9 +525,9 @@ impl DatabaseTabContent {
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .child("Username:")
                             )
-                            .child(self.connection_info.username.clone())
+                            .child(conn_username)
                     )
-                    .when_some(self.connection_info.database.as_ref(), |this, db| {
+                    .when_some(conn_database, |this, db| {
                         this.child(
                             h_flex()
                                 .gap_2()
@@ -478,7 +536,7 @@ impl DatabaseTabContent {
                                         .font_weight(FontWeight::SEMIBOLD)
                                         .child("Database:")
                                 )
-                                .child(db.clone())
+                                .child(db)
                         )
                     })
             )
@@ -501,7 +559,7 @@ impl DatabaseTabContent {
 
         let db_tree_view = self.db_tree_view.clone();
         let tab_container = self.tab_container.clone();
-        let connection_info = self.connection_info.clone();
+        let first_conn = self.connections.first().cloned();
 
         h_flex()
             .w_full()
@@ -534,25 +592,27 @@ impl DatabaseTabContent {
                     .tooltip("新建表")
                     .on_click(move |_, window, cx| {
                         use crate::table_designer_view::TableDesignerView;
-                        
-                        // 获取当前选中的数据库
-                        let current_db = db_tree_view.read(cx).get_selected_database();
-                        let database = current_db.unwrap_or_else(|| "default".to_string());
-                        let config = connection_info.to_db_connection();
-                        
-                        let tab_id = format!("new-table-{}", Uuid::new_v4());
-                        
-                        tab_container.update(cx, |container, cx| {
-                            let table_designer = TableDesignerView::new_table(
-                                database,
-                                config.id,
-                                config.database_type,
-                                window,
-                                cx,
-                            );
-                            let tab = TabItem::new(tab_id, table_designer.read(cx).clone());
-                            container.add_and_activate_tab(tab, cx);
-                        });
+
+                        if let Some(conn) = first_conn.as_ref() {
+                            // 获取当前选中的数据库
+                            let current_db = db_tree_view.read(cx).get_selected_database();
+                            let database = current_db.unwrap_or_else(|| "default".to_string());
+                            let config = conn.to_db_connection();
+
+                            let tab_id = format!("new-table-{}", Uuid::new_v4());
+
+                            tab_container.update(cx, |container, cx| {
+                                let table_designer = TableDesignerView::new_table(
+                                    database,
+                                    config.id,
+                                    config.database_type,
+                                    window,
+                                    cx,
+                                );
+                                let tab = TabItem::new(tab_id, table_designer.read(cx).clone());
+                                container.add_and_activate_tab(tab, cx);
+                            });
+                        }
                     })
             )
     }
@@ -560,7 +620,10 @@ impl DatabaseTabContent {
 
 impl TabContent for DatabaseTabContent {
     fn title(&self) -> SharedString {
-        self.connection_info.name.clone().into()
+        self.connections.first()
+            .map(|c| c.name.clone())
+            .unwrap_or_else(|| "Database".to_string())
+            .into()
     }
 
     fn icon(&self) -> Option<IconName> {
@@ -600,7 +663,10 @@ impl TabContent for DatabaseTabContent {
     }
 
     fn content_type(&self) -> TabContentType {
-        TabContentType::Custom(format!("database-{}", self.connection_info.name))
+        let name = self.connections.first()
+            .map(|c| c.name.clone())
+            .unwrap_or_else(|| "unknown".to_string());
+        TabContentType::Custom(format!("database-{}", name))
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -611,7 +677,7 @@ impl TabContent for DatabaseTabContent {
 impl Clone for DatabaseTabContent {
     fn clone(&self) -> Self {
         Self {
-            connection_info: self.connection_info.clone(),
+            connections: self.connections.clone(),
             tab_container: self.tab_container.clone(),
             db_tree_view: self.db_tree_view.clone(),
             objects_panel: self.objects_panel.clone(),

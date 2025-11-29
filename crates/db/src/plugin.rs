@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use crate::connection::{DbConnection, DbError};
 use crate::executor::{ExecOptions, SqlResult};
 use crate::types::*;
@@ -117,29 +118,32 @@ pub trait DatabasePlugin: Send + Sync {
             format!("{}:table_folder", id),
             format!("Tables ({})", table_count),
             DbNodeType::TablesFolder,
+            node.connection_id.clone()
         ).with_parent_context(id);
 
         if table_count > 0 {
             let children: Vec<DbNode> = tables
                 .into_iter()
                 .map(|table_info| {
-                    let mut node = DbNode::new(
+                    let mut metadata: HashMap<String, String> = HashMap::new();
+                    metadata.insert("database".to_string(), database.to_string());
+                    
+                    // Add comment as additional metadata if available
+                    if let Some(comment) = &table_info.comment {
+                        if !comment.is_empty() {
+                            metadata.insert("comment".to_string(), comment.clone());
+                        }
+                    }
+                    
+                    DbNode::new(
                         format!("{}:table_folder:{}", id, table_info.name),
                         table_info.name.clone(),
                         DbNodeType::Table,
+                        node.connection_id.clone()
                     )
                     .with_children_flag(true)
                     .with_parent_context(format!("{}:table_folder", id))
-                    .with_metadata(database);
-
-                    // Add comment as additional metadata if available
-                    if let Some(comment) = table_info.comment {
-                        if !comment.is_empty() {
-                            node = node.with_metadata(format!("{} - {}", database, comment));
-                        }
-                    }
-
-                    node
+                    .with_metadata(metadata)
                 })
                 .collect();
             table_folder.children = children;
@@ -156,19 +160,26 @@ pub trait DatabasePlugin: Send + Sync {
                 format!("{}:views_folder", id),
                 format!("Views ({})", view_count),
                 DbNodeType::ViewsFolder,
+                node.connection_id.clone()
             ).with_parent_context(id);
 
             let children: Vec<DbNode> = views
                 .into_iter()
                 .map(|view| {
+                    let mut metadata = HashMap::new();
+                    if let Some(comment) = view.comment {
+                        metadata.insert("comment".to_string(), comment);
+                    }
+                    
                     let mut node = DbNode::new(
                         format!("{}:views_folder:{}", id, view.name),
                         view.name.clone(),
                         DbNodeType::View,
+                        node.connection_id.clone()
                     ).with_parent_context(format!("{}:views_folder", id));
-
-                    if let Some(comment) = view.comment {
-                        node = node.with_metadata(comment);
+                    
+                    if !metadata.is_empty() {
+                        node = node.with_metadata(metadata);
                     }
                     node
                 })
@@ -186,6 +197,17 @@ pub trait DatabasePlugin: Send + Sync {
     async fn load_node_children(&self, connection: &dyn DbConnection, node: &DbNode) -> Result<Vec<DbNode>> {
         let id = &node.id;
         match node.node_type {
+            DbNodeType::Connection => {
+                let databases = self.list_databases(connection).await?;
+                Ok(databases
+                    .into_iter()
+                    .map(|db| {
+                        DbNode::new(format!("{}:{}", &node.id, db), db.clone(), DbNodeType::Database, node.id.clone())
+                            .with_children_flag(true)
+                            .with_parent_context(id)
+                    })
+                    .collect())
+            }
             DbNodeType::Database => {
                 self.build_database_tree(connection, node).await
             }
@@ -199,7 +221,8 @@ pub trait DatabasePlugin: Send + Sync {
                 }
             }
             DbNodeType::Table => {
-                let db = node.metadata.as_ref().unwrap();
+                let metadata = node.metadata.as_ref().unwrap();
+                let db = metadata.get("database").unwrap();
                 let table = &node.name;
                 let mut children = Vec::new();
 
@@ -210,24 +233,29 @@ pub trait DatabasePlugin: Send + Sync {
                     format!("{}:columns_folder", id),
                     format!("Columns ({})", column_count),
                     DbNodeType::ColumnsFolder,
+                    node.connection_id.clone()
                 ).with_parent_context(id);
 
                 if column_count > 0 {
                     let column_nodes: Vec<DbNode> = columns
                         .into_iter()
                         .map(|col| {
-                            let mut metadata = col.data_type.clone();
+                            let mut meta_str = col.data_type.clone();
                             if !col.is_nullable {
-                                metadata.push_str(" NOT NULL");
+                                meta_str.push_str(" NOT NULL");
                             }
                             if col.is_primary_key {
-                                metadata.push_str(" PRIMARY KEY");
+                                meta_str.push_str(" PRIMARY KEY");
                             }
+                            
+                            let mut metadata = HashMap::new();
+                            metadata.insert("type".to_string(), meta_str);
 
                             DbNode::new(
                                 format!("{}:columns_folder:{}", id, col.name),
                                 col.name,
                                 DbNodeType::Column,
+                                node.connection_id.clone()
                             )
                             .with_metadata(metadata)
                             .with_parent_context(format!("{}:columns_folder", id))
@@ -247,22 +275,27 @@ pub trait DatabasePlugin: Send + Sync {
                     format!("{}:indexes_folder", id),
                     format!("Indexes ({})", index_count),
                     DbNodeType::IndexesFolder,
+                    node.connection_id.clone()
                 ).with_parent_context(id);
 
                 if index_count > 0 {
                     let index_nodes: Vec<DbNode> = indexes
                         .into_iter()
                         .map(|idx| {
-                            let metadata = format!(
+                            let meta_str = format!(
                                 "{} ({})",
                                 if idx.is_unique { "UNIQUE" } else { "INDEX" },
                                 idx.columns.join(", ")
                             );
+                            
+                            let mut metadata = HashMap::new();
+                            metadata.insert("type".to_string(), meta_str);
 
                             DbNode::new(
                                 format!("{}:indexes_folder:{}", id, idx.name),
                                 idx.name,
                                 DbNodeType::Index,
+                                node.connection_id.clone()
                             )
                             .with_metadata(metadata)
                             .with_parent_context(format!("{}:indexes_folder", id))

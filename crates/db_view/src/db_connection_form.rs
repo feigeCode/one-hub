@@ -3,6 +3,7 @@ use gpui_component::{
     button::{Button, ButtonVariants as _},
     h_flex,
     input::{Input, InputEvent, InputState},
+    menu::{DropdownMenu as _, PopupMenuItem},
     tab::{Tab, TabBar},
     v_flex, ActiveTheme, Disableable, Sizable, Size, StyledExt,
 };
@@ -185,6 +186,8 @@ pub struct DbConnectionForm {
     field_inputs: Vec<Entity<InputState>>,
     is_testing: Entity<bool>,
     test_result: Entity<Option<Result<bool, String>>>,
+    workspaces: Vec<core::storage::Workspace>,
+    selected_workspace_id: Entity<Option<i64>>,
 }
 
 impl DbConnectionForm {
@@ -233,6 +236,7 @@ impl DbConnectionForm {
 
         let is_testing = cx.new(|_| false);
         let test_result = cx.new(|_| None);
+        let selected_workspace_id = cx.new(|_| None);
 
         Self {
             config,
@@ -243,7 +247,14 @@ impl DbConnectionForm {
             field_inputs,
             is_testing,
             test_result,
+            workspaces: Vec::new(),
+            selected_workspace_id,
         }
+    }
+
+    pub fn set_workspaces(&mut self, workspaces: Vec<core::storage::Workspace>, cx: &mut Context<Self>) {
+        self.workspaces = workspaces;
+        cx.notify();
     }
 
     pub fn load_connection(&mut self, connection: &core::storage::StoredConnection, window: &mut Window, cx: &mut Context<Self>) {
@@ -256,6 +267,10 @@ impl DbConnectionForm {
         if let Some(db) = &connection.database {
             self.set_field_value("database", db, window, cx);
         }
+        self.selected_workspace_id.update(cx, |ws_id, cx| {
+            *ws_id = connection.workspace_id;
+            cx.notify();
+        });
     }
 
     fn set_field_value(&mut self, field_name: &str, value: &str, window: &mut Window, cx: &mut Context<Self>) {
@@ -298,6 +313,7 @@ impl DbConnectionForm {
                     Some(db)
                 }
             },
+            workspace_id: *self.selected_workspace_id.read(cx),
         }
     }
 
@@ -463,6 +479,9 @@ impl Render for DbConnectionForm {
                         div()
                             .min_h(px(300.))
                             .when(!current_tab_fields.is_empty(), |this| {
+                                let is_general_tab = self.active_tab == 0;
+                                let selected_ws_id = *self.selected_workspace_id.read(cx);
+                                
                                 this.child(
                                     v_form()
                                         .layout(Axis::Horizontal)
@@ -482,7 +501,55 @@ impl Render for DbConnectionForm {
                                                         .label_justify_end()
                                                         .child(Input::new(&self.field_inputs[input_idx]).w_full())
                                                 }),
-                                        ),
+                                        )
+                                        .when(is_general_tab, |form| {
+                                            let view = cx.entity();
+                                            let workspaces = self.workspaces.clone();
+                                            let selected_label = if let Some(ws_id) = selected_ws_id {
+                                                workspaces.iter()
+                                                    .find(|ws| ws.id == Some(ws_id))
+                                                    .map(|ws| ws.name.clone())
+                                                    .unwrap_or_else(|| "无".to_string())
+                                            } else {
+                                                "无".to_string()
+                                            };
+                                            
+                                            form.child(
+                                                field()
+                                                    .label("工作区")
+                                                    .items_center()
+                                                    .label_justify_end()
+                                                    .child(
+                                                        Button::new("workspace-dropdown")
+                                                            .w_full()
+                                                            .label(selected_label)
+                                                            .dropdown_menu(move |menu, window, _cx| {
+                                                                let mut m = menu.item(
+                                                                    PopupMenuItem::new("无")
+                                                                        .on_click(window.listener_for(&view, |this, _, _, cx| {
+                                                                            this.selected_workspace_id.update(cx, |ws_id, cx| {
+                                                                                *ws_id = None;
+                                                                                cx.notify();
+                                                                            });
+                                                                        }))
+                                                                );
+                                                                for ws in &workspaces {
+                                                                    let ws_id = ws.id;
+                                                                    m = m.item(
+                                                                        PopupMenuItem::new(ws.name.clone())
+                                                                            .on_click(window.listener_for(&view, move |this, _, _, cx| {
+                                                                                this.selected_workspace_id.update(cx, |ws_id_state, cx| {
+                                                                                    *ws_id_state = ws_id;
+                                                                                    cx.notify();
+                                                                                });
+                                                                            }))
+                                                                    );
+                                                                }
+                                                                m
+                                                            })
+                                                    )
+                                            )
+                                        }),
                                 )
                             })
                             .when(current_tab_fields.is_empty(), |this| {

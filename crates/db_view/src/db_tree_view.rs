@@ -1,6 +1,6 @@
 use core::storage::StoredConnection;
 use std::collections::{HashMap, HashSet};
-use gpui::{App, AppContext, Context, Entity, IntoElement, InteractiveElement, ParentElement, Render, Styled, Window, div, StatefulInteractiveElement, EventEmitter, SharedString, Focusable, FocusHandle, WeakEntity};
+use gpui::{App, AppContext, Context, Entity, IntoElement, InteractiveElement, ParentElement, Render, Styled, Window, div, StatefulInteractiveElement, EventEmitter, SharedString, Focusable, FocusHandle};
 use tracing::log::trace;
 use gpui_component::{
     ActiveTheme, IconName,
@@ -10,7 +10,7 @@ use gpui_component::{
     tree::TreeItem,
     v_flex,
 };
-use db::{GlobalDbState, DbNode, DbNodeType, spawn_result, DbConnectionConfig};
+use db::{GlobalDbState, DbNode, DbNodeType, spawn_result};
 use gpui_component::context_menu_tree::{context_menu_tree, ContextMenuTreeState};
 // ============================================================================
 // DbTreeView Events
@@ -20,19 +20,19 @@ use gpui_component::context_menu_tree::{context_menu_tree, ContextMenuTreeState}
 #[derive(Debug, Clone)]
 pub enum DbTreeViewEvent {
     /// 打开表数据标签页
-    OpenTableData { database: String, table: String },
+    OpenTableData { node: DbNode },
     /// 打开视图数据标签页
-    OpenViewData { database: String, view: String },
+    OpenViewData { node: DbNode },
     /// 打开表结构标签页
-    OpenTableStructure { database: String, table: String },
+    OpenTableStructure { node: DbNode },
     /// 为指定数据库创建新查询
-    CreateNewQuery { database: String },
+    CreateNewQuery { node: DbNode },
     /// 节点被选中（用于更新 objects panel）
-    NodeSelected { node_id: String },
+    NodeSelected { node: DbNode },
     /// 导入数据
-    ImportData { database: String, table: Option<String> },
+    ImportData { node: DbNode },
     /// 导出数据
-    ExportData { database: String, tables: Vec<String> },
+    ExportData { node: DbNode },
 }
 
 // ============================================================================
@@ -53,52 +53,67 @@ pub struct DbTreeView {
     expanded_nodes: HashSet<String>,
     // 当前树的根节点集合，便于我们更新子节点
     items: Vec<TreeItem>,
-    // 当前连接名称
+    // 当前连接名称或者工作区名称
     connection_name: Option<String>,
-    // 连接 ID（单一数据源）
-    connection_id: String,
+    // 工作区ID
+    _workspace_id: Option<i64>,
 }
 
 impl DbTreeView {
-    pub fn new(connection: StoredConnection, _window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(connections: &Vec<StoredConnection>, _window: &mut Window, cx: &mut Context<Self>) -> Self {
         let focus_handle = cx.focus_handle();
+        let mut db_nodes = HashMap::new();
+        let mut init_nodes = vec![];
+        let mut workspace_id = None;
+        if connections.is_empty() {
+            let node =  DbNode::new("root", "No Database Connected", DbNodeType::Connection, "".to_string());
+            db_nodes.insert(
+                "root".to_string(),
+                node.clone()
+            );
+            init_nodes.push( node)
+        }else {
+            for conn in connections {
+                workspace_id = conn.workspace_id.clone();
+                let id = conn.id.unwrap().to_string();
+                let node = DbNode::new(id.clone(), conn.name.to_string(), DbNodeType::Connection, id.clone());
+                db_nodes.insert(id, node.clone());
+                init_nodes.push(node);
+            }
+        }
+        init_nodes.sort();
+        let items = Self::create_initial_tree(init_nodes);
+        let clone_items = items.clone();
         let tree_state = cx.new(|cx| {
-            ContextMenuTreeState::new(cx)
+            ContextMenuTreeState::new(cx).items(items)
         });
-        
-        let connection_id = connection.id.unwrap().to_string();
-        let config = connection.to_db_connection();
-        
-        // 注册连接配置到 GlobalDbState
-        let global_state = cx.global::<GlobalDbState>().clone();
-        cx.spawn(async move |_, _| {
-            global_state.register_connection(config).await;
-        }).detach();
-        
         Self {
             focus_handle,
             tree_state,
             selected_item: None,
-            db_nodes: HashMap::new(),
+            db_nodes,
             loaded_children: HashSet::new(),
             loading_nodes: HashSet::new(),
             expanded_nodes: HashSet::new(),
-            items: vec![],
+            items: clone_items,
             connection_name: None,
-            connection_id,
+            _workspace_id: workspace_id,
         }
     }
 
-    /// 重新加载指定节点的子节点
-    pub fn reload_children(&mut self, node_id: String, cx: &mut Context<Self>) {
-        self.loaded_children.remove(&node_id);
-        if let Some(n) = self.db_nodes.get_mut(&node_id) {
-            n.children_loaded = false;
-            n.children.clear();
+    /// 创建初始树结构（未连接状态）
+    fn create_initial_tree(init_nodes: Vec<DbNode>) -> Vec<TreeItem> {
+        if init_nodes.is_empty() {
+            return vec![
+                TreeItem::new("root".to_string(), "No Database Connected".to_string())
+            ]
         }
-        self.lazy_load_children(node_id, cx);
+        let mut items: Vec<TreeItem> = Vec::new();
+        for node in init_nodes.iter() {
+            items.push(TreeItem::new(SharedString::new(node.id.to_string()), SharedString::new(node.name.to_string())))
+        }
+        items
     }
-
 
     /// 设置连接名称
     pub fn set_connection_name(&mut self, name: String) {
@@ -106,107 +121,57 @@ impl DbTreeView {
     }
 
 
-
-    /// 将 DbNode 转换为 TreeItem
-    fn db_node_to_tree_item(node: &DbNode) -> TreeItem {
-        let mut item = TreeItem::new(node.id.clone(), node.name.clone());
-
-        // 如果节点有子节点能力但未加载，设置一个占位子节点让树组件显示展开按钮
-        if node.has_children && !node.children_loaded {
-            // 使用一个特殊的占位节点
-            let placeholder = TreeItem::new(
-                format!("{}_placeholder", node.id),
-                "Loading...".to_string()
-            );
-            item = item.children(vec![placeholder]);
-        } else if !node.children.is_empty() {
-            // 如果已经加载了子节点，递归转换
-            let children: Vec<TreeItem> = node
-                .children
-                .iter()
-                .map(Self::db_node_to_tree_item)
-                .collect();
-            item = item.children(children);
-        }
-
-        item
-    }
-
-
-
-    /// 刷新树结构（从数据库加载数据库列表）
-    pub fn refresh_tree(&mut self, cx: &mut Context<Self>) {
-        let global_state = cx.global::<GlobalDbState>().clone();
-        let tree_state = self.tree_state.clone();
-        let connection_id = self.connection_id.clone();
+    /// 刷新指定节点及其子节点
+    /// 
+    /// 这个方法会：
+    /// 1. 清除节点的子节点缓存
+    /// 2. 递归清除所有后代节点
+    /// 3. 重新加载子节点
+    /// 4. 如果节点已展开，保持展开状态
+    pub fn refresh_tree(&mut self, node_id: String, cx: &mut Context<Self>) {
+        eprintln!("Refreshing node: {}", node_id);
         
-        cx.spawn(async move |this, cx| {
-            let (plugin, conn_arc) = match global_state.get_plugin_and_connection(&connection_id).await {
-                Ok(result) => result,
-                Err(e) => {
-                    eprintln!("Failed to get plugin and connection: {}", e);
-                    return;
-                }
-            };
+        // 递归清除节点及其所有后代
+        self.clear_node_descendants(&node_id);
+        
+        // 清除加载状态
+        self.loaded_children.remove(&node_id);
+        self.loading_nodes.remove(&node_id);
+        
+        // 重置节点状态
+        if let Some(node) = self.db_nodes.get_mut(&node_id) {
+            node.children_loaded = false;
+            node.children.clear();
+        }
+        
+        // 如果节点已展开，重新加载子节点
+        if self.expanded_nodes.contains(&node_id) {
+            self.lazy_load_children(node_id, cx);
+        } else {
+            // 如果节点未展开，只需重建树以更新占位符
+            self.rebuild_tree(cx);
+        }
+    }
+    
+    /// 递归清除节点的所有后代
+    fn clear_node_descendants(&mut self, node_id: &str) {
+        // 获取当前节点的所有子节点ID
+        let child_ids: Vec<String> = if let Some(node) = self.db_nodes.get(node_id) {
+            node.children.iter().map(|c| c.id.clone()).collect()
+        } else {
+            return;
+        };
+        
+        // 递归清除每个子节点
+        for child_id in child_ids {
+            self.clear_node_descendants(&child_id);
             
-            let conn = conn_arc.read().await;
-            let databases = match plugin.list_databases(&**conn).await {
-                Ok(dbs) => dbs,
-                Err(e) => {
-                    eprintln!("Failed to list databases: {}", e);
-                    return;
-                }
-            };
-            
-            eprintln!("Loaded {} databases", databases.len());
-            
-            // 构建树结构
-            this.update(cx, |this: &mut Self, cx| {
-                // 清空旧数据
-                this.db_nodes.clear();
-                this.loaded_children.clear();
-                this.loading_nodes.clear();
-                this.expanded_nodes.clear();
-                
-                // 创建数据库节点
-                let mut db_nodes_vec = Vec::new();
-                for db_name in databases.iter() {
-                    let db_id = format!("db:{}", db_name);
-                    eprintln!("Creating database node: {} with id: {}", db_name, db_id);
-                    
-                    let db_node = DbNode::new(db_id.clone(), db_name.clone(), DbNodeType::Database)
-                        .with_children_flag(true);
-
-                    this.db_nodes.insert(db_id.clone(), db_node.clone());
-                    db_nodes_vec.push(db_node);
-                }
-
-                eprintln!("Total databases loaded: {}", db_nodes_vec.len());
-                
-                // 转换为 TreeItem
-                let items: Vec<TreeItem> = db_nodes_vec
-                    .iter()
-                    .map(|node| Self::db_node_to_tree_item(node))
-                    .collect();
-                
-                this.items = items.clone();
-                
-                // 更新树状态
-                tree_state.update(cx, |state, cx| {
-                    state.set_items(items, cx);
-                });
-                
-                // 自动展开第一个数据库
-                if let Some(first_db) = db_nodes_vec.first() {
-                    let db_id = first_db.id.clone();
-                    eprintln!("Auto-expanding first database: {}", db_id);
-                    this.expanded_nodes.insert(db_id.clone());
-                    this.lazy_load_children(db_id, cx);
-                }
-                
-                cx.notify();
-            }).ok();
-        }).detach();
+            // 从所有集合中移除子节点
+            self.db_nodes.remove(&child_id);
+            self.loaded_children.remove(&child_id);
+            self.loading_nodes.remove(&child_id);
+            self.expanded_nodes.remove(&child_id);
+        }
     }
 
     /// 懒加载节点的子节点
@@ -230,10 +195,10 @@ impl DbTreeView {
                   node_id, node.node_type, node.has_children);
 
         // 如果节点没有子节点能力，跳过
-        if !node.has_children {
-            eprintln!("Node {} has no children capability", node_id);
-            return;
-        }
+        // if !node.has_children {
+        //     eprintln!("Node {} has no children capability", node_id);
+        //     return;
+        // }
 
         // 标记为正在加载
         self.loading_nodes.insert(node_id.clone());
@@ -241,7 +206,7 @@ impl DbTreeView {
 
         let global_state = cx.global::<GlobalDbState>().clone();
         let clone_node_id = node_id.clone();
-        let connection_id = self.connection_id.clone();
+        let connection_id = node.connection_id.clone();
         cx.spawn(async move |this, cx| {
             // 使用 DatabasePlugin 的方法加载子节点
             let children_result = spawn_result(async move {
@@ -330,6 +295,22 @@ impl DbTreeView {
         }
     }
 
+    /// 递归切换树项的展开状态
+    fn toggle_tree_item_expanded(item: &TreeItem, target_id: &str, current_expanded: bool) -> TreeItem {
+        let mut new_item = TreeItem::new(item.id.clone(), item.label.clone())
+            .expanded(if item.id.as_ref() == target_id {
+                !current_expanded
+            } else {
+                item.is_expanded()
+            });
+
+        for child in &item.children {
+            new_item = new_item.child(Self::toggle_tree_item_expanded(child, target_id, current_expanded));
+        }
+
+        new_item
+    }
+
     /// 递归构建 TreeItem，使用 db_nodes 映射
     fn db_node_to_tree_item_recursive(
         node: &DbNode,
@@ -407,8 +388,7 @@ impl DbTreeView {
                     if let Some(database) = self.find_parent_database(&node.id) {
                         eprintln!("Opening table data tab: {}.{}", database, node.name);
                         cx.emit(DbTreeViewEvent::OpenTableData {
-                            database,
-                            table: node.name.clone(),
+                            node
                         });
                     }
                 }
@@ -417,9 +397,39 @@ impl DbTreeView {
                     if let Some(database) = self.find_parent_database(&node.id) {
                         eprintln!("Opening view data tab: {}.{}", database, node.name);
                         cx.emit(DbTreeViewEvent::OpenViewData {
-                            database,
-                            view: node.name.clone(),
+                            node
                         });
+                    }
+                }
+                DbNodeType::Connection  => {
+                    let node_id = item.id.to_string();
+                    let is_expanded = self.expanded_nodes.contains(&node_id);
+                    
+                    // 切换展开状态
+                    if is_expanded {
+                        self.expanded_nodes.remove(&node_id);
+                    } else {
+                        self.expanded_nodes.insert(node_id.clone());
+                    }
+                    
+                    // 手动切换树状态中的展开状态
+                    let tree_state = self.tree_state.clone();
+                    tree_state.update(cx, |state, cx| {
+                        // 找到根节点并切换展开状态
+                        let new_items: Vec<TreeItem> = state.entries
+                            .iter()
+                            .filter(|e| e.depth == 0 && e.item.id == node_id)
+                            .map(|e| {
+                                Self::toggle_tree_item_expanded(&e.item, &node_id, is_expanded)
+                            })
+                            .collect();
+                        
+                        state.set_items(new_items, cx);
+                    });
+                    
+                    // 如果是展开操作，加载子节点
+                    if !is_expanded {
+                        self.lazy_load_children(node_id, cx);
                     }
                 }
                 _ => {
@@ -428,6 +438,18 @@ impl DbTreeView {
             }
         }
         cx.notify();
+    }
+
+    
+    fn handle_item_click(&mut self, item: TreeItem, cx: &mut Context<Self>) {
+        self.selected_item = Some(item.clone());
+        if let Some(node) = self.db_nodes.get(item.id.as_ref()).cloned() {
+            // 发出节点选择事件
+            cx.emit(DbTreeViewEvent::NodeSelected {
+                node
+            });
+            cx.notify();
+        }
     }
 
     /// 获取节点信息（公开方法）
@@ -440,13 +462,13 @@ impl DbTreeView {
         if let Some(item) = &self.selected_item {
             // 从选中的节点ID中提取数据库名
             if let Some(node) = self.db_nodes.get(item.id.as_ref()) {
-                match node.node_type {
-                    db::types::DbNodeType::Database => {
-                        return Some(node.name.clone());
+                return match node.node_type {
+                    DbNodeType::Database => {
+                        Some(node.name.clone())
                     }
                     _ => {
                         // 从父节点上下文中查找数据库
-                        return self.find_parent_database(item.id.as_ref());
+                        self.find_parent_database(item.id.as_ref())
                     }
                 }
             }
@@ -506,7 +528,7 @@ impl Render for DbTreeView {
 
                                 context_menu_tree(
                                     &self.tree_state,
-                                    move |ix, item, depth, _selected, window, cx| {
+                                    move |ix, item, _depth, _selected, _window, cx| {
                                         let node_id = item.id.to_string();
                                         let (icon, label_text, _item_clone) = view.update(cx, |this, _cx| {
                                             let icon = this.get_icon_for_node(&node_id, item.is_expanded());
@@ -569,21 +591,20 @@ impl Render for DbTreeView {
                                                             let mut menu = menu
                                                                 .label(format!("Type: {}", node_type))
                                                                 .separator();
-
+                                                            
                                                             // 根据节点类型添加不同的菜单项
                                                             match node.node_type {
                                                                 DbNodeType::Database => {
-                                                                    let db_name = node.name.clone();
-                                                                    let db_name_for_query = db_name.clone();
-                                                                    let db_name_for_import = db_name.clone();
-                                                                    let db_name_for_export = db_name.clone();
-
+                                                                    let node1 = node.clone();
+                                                                    let node2 = node.clone();
+                                                                    let node3 = node.clone();
+                                                                    
                                                                     menu = menu
                                                                         .item(
                                                                             PopupMenuItem::new("New Query")
                                                                                 .on_click(window.listener_for(&view_clone, move |_this, _, _, cx| {
                                                                                     cx.emit(DbTreeViewEvent::CreateNewQuery {
-                                                                                        database: db_name_for_query.clone(),
+                                                                                        node: node1.clone()
                                                                                     });
                                                                                 }))
                                                                         )
@@ -592,8 +613,7 @@ impl Render for DbTreeView {
                                                                             PopupMenuItem::new("Import Data")
                                                                                 .on_click(window.listener_for(&view_clone, move |_this, _, _, cx| {
                                                                                     cx.emit(DbTreeViewEvent::ImportData {
-                                                                                        database: db_name_for_import.clone(),
-                                                                                        table: None,
+                                                                                        node: node2.clone()
                                                                                     });
                                                                                 }))
                                                                         )
@@ -601,30 +621,24 @@ impl Render for DbTreeView {
                                                                             PopupMenuItem::new("Export Database")
                                                                                 .on_click(window.listener_for(&view_clone, move |_this, _, _, cx| {
                                                                                     cx.emit(DbTreeViewEvent::ExportData {
-                                                                                        database: db_name_for_export.clone(),
-                                                                                        tables: vec![],
+                                                                                        node: node3.clone()
                                                                                     });
                                                                                 }))
                                                                         )
                                                                         .separator();
                                                                 }
                                                                 DbNodeType::Table => {
-                                                                    let table_name = node.name.clone();
-                                                                    // TODO 获取真实数据
-                                                                    let database_name = "ai_app".to_string();
-                                                                    let table_for_import = table_name.clone();
-                                                                    let db_for_import = database_name.clone();
-                                                                    let table_for_export = table_name.clone();
-                                                                    let db_for_export = database_name.clone();
-
+                                                                    let node1 = node.clone();
+                                                                    let node2 = node.clone();
+                                                                    let node3 = node.clone();
+                                                                    
                                                                     menu = menu
                                                                         .item(PopupMenuItem::new("View Table Data"))
                                                                         .item(
                                                                             PopupMenuItem::new("Edit Table")
                                                                             .on_click(window.listener_for(&view_clone, move |_this, _, _, cx| {
                                                                                 cx.emit(DbTreeViewEvent::OpenTableStructure {
-                                                                                    database: database_name.clone(),
-                                                                                    table: table_name.clone(),
+                                                                                    node: node1.clone()
                                                                                 });
                                                                             }))
                                                                         )
@@ -633,8 +647,7 @@ impl Render for DbTreeView {
                                                                             PopupMenuItem::new("Import to Table")
                                                                                 .on_click(window.listener_for(&view_clone, move |_this, _, _, cx| {
                                                                                     cx.emit(DbTreeViewEvent::ImportData {
-                                                                                        database: db_for_import.clone(),
-                                                                                        table: Some(table_for_import.clone()),
+                                                                                        node: node2.clone()
                                                                                     });
                                                                                 }))
                                                                         )
@@ -642,8 +655,7 @@ impl Render for DbTreeView {
                                                                             PopupMenuItem::new("Export Table")
                                                                                 .on_click(window.listener_for(&view_clone, move |_this, _, _, cx| {
                                                                                     cx.emit(DbTreeViewEvent::ExportData {
-                                                                                        database: db_for_export.clone(),
-                                                                                        tables: vec![table_for_export.clone()],
+                                                                                        node: node3.clone()
                                                                                     });
                                                                                 }))
                                                                         )
@@ -657,9 +669,9 @@ impl Render for DbTreeView {
                                                                 let view_ref2 = view_clone.clone();
                                                                 let id_clone = node_id_clone.clone();
                                                                 menu = menu.item(
-                                                                    PopupMenuItem::new("Load Children")
+                                                                    PopupMenuItem::new("Reload Children")
                                                                         .on_click(window.listener_for(&view_ref2, move |this, _, _, cx| {
-                                                                            this.reload_children(id_clone.clone(), cx);
+                                                                            this.refresh_tree(id_clone.clone(), cx);
                                                                         }))
                                                                 );
                                                             }
@@ -669,7 +681,7 @@ impl Render for DbTreeView {
                                                             menu.item(
                                                                 PopupMenuItem::new("Refresh Node")
                                                                     .on_click(window.listener_for(&view_ref2, move |this, _, _, cx| {
-                                                                        this.reload_children(id_clone.clone(), cx);
+                                                                        this.refresh_tree(id_clone.clone(), cx);
                                                                     }))
                                                             )
                                                         } else {
@@ -682,12 +694,7 @@ impl Render for DbTreeView {
                                 .on_click({
                                     move |_ix, item, cx| {
                                         view_for_click.update(cx, |this, cx| {
-                                            this.selected_item = Some(item.clone());
-                                            // 发出节点选择事件
-                                            cx.emit(DbTreeViewEvent::NodeSelected {
-                                                node_id: item.id.to_string(),
-                                            });
-                                            cx.notify();
+                                           this.handle_item_click(item.clone(), cx)
                                         });
                                     }
                                 })
