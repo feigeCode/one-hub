@@ -1,17 +1,14 @@
-use gpui::{
-    div, App, AppContext, ClickEvent, Context, Entity,
-    EventEmitter, FocusHandle, Focusable, IntoElement, ParentElement, Render, Styled,
-    Window,
-};
-use gpui_component::{
-    button::{Button, ButtonVariants as _, DropdownButton},
-    h_flex,
-    input::{Input, InputEvent, InputState},
-    menu::PopupMenuItem,
-    v_flex, ActiveTheme, Disableable, IconName, Sizable, Size, StyledExt,
-};
 use db::DatabaseType;
 use db::DbConnectionConfig;
+use gpui::{div, px, App, AppContext, Axis, ClickEvent, Context, Entity, EventEmitter, FocusHandle, Focusable, IntoElement, ParentElement, Render, Styled, Window};
+use gpui_component::form::{field, v_form};
+use gpui_component::{
+    button::{Button, ButtonVariants as _},
+    h_flex,
+    input::{Input, InputEvent, InputState}
+    ,
+    v_flex, ActiveTheme, Disableable, Sizable, Size, StyledExt,
+};
 
 /// Represents a field in the connection form
 #[derive(Clone, Debug)]
@@ -78,7 +75,7 @@ impl DbFormConfig {
             db_type: DatabaseType::MySQL,
             title: "Connect to MySQL".to_string(),
             fields: vec![
-                FormField::new("name", "Connection Name", FormFieldType::Text)
+                FormField::new("name", "Name", FormFieldType::Text)
                     .placeholder("My MySQL Database")
                     .default("Local MySQL"),
                 FormField::new("host", "Host", FormFieldType::Text)
@@ -107,7 +104,7 @@ impl DbFormConfig {
             db_type: DatabaseType::PostgreSQL,
             title: "Connect to PostgreSQL".to_string(),
             fields: vec![
-                FormField::new("name", "Connection Name", FormFieldType::Text)
+                FormField::new("name", "Name", FormFieldType::Text)
                     .placeholder("My PostgreSQL Database")
                     .default("Local PostgreSQL"),
                 FormField::new("host", "Host", FormFieldType::Text)
@@ -182,8 +179,7 @@ impl DbConnectionForm {
 
                 // Set password mode if needed
                 if field.field_type == FormFieldType::Password {
-                    // Note: InputState doesn't have a built-in password method
-                    // We'll need to add this feature or handle it differently
+                    input_state = input_state.masked(true);
                 }
 
                 input_state.set_value(field.default_value.clone(), window, cx);
@@ -250,59 +246,6 @@ impl DbConnectionForm {
             .find(|(name, _)| name == field_name)
             .map(|(_, value)| value.read(cx).clone())
             .unwrap_or_default()
-    }
-
-    fn switch_db_type(&mut self, db_type: DatabaseType, window: &mut Window, cx: &mut Context<Self>) {
-        // Update current db type
-        self.current_db_type.update(cx, |current, cx| {
-            *current = db_type;
-            cx.notify();
-        });
-
-        // Update config based on new db type
-        self.config = match db_type {
-            DatabaseType::MySQL => DbFormConfig::mysql(),
-            DatabaseType::PostgreSQL => DbFormConfig::postgres(),
-        };
-
-        // Clear and reinitialize field values and inputs
-        self.field_values.clear();
-        self.field_inputs.clear();
-
-        for field in &self.config.fields {
-            let value = cx.new(|_| field.default_value.clone());
-            self.field_values.push((field.name.clone(), value.clone()));
-
-            let input = cx.new(|cx| {
-                let mut input_state = InputState::new(window, cx)
-                    .placeholder(&field.placeholder);
-
-                input_state.set_value(field.default_value.clone(), window, cx);
-                input_state
-            });
-
-            // Subscribe to input changes
-            let value_clone = value.clone();
-            cx.subscribe_in(&input, window, move |_form, _input, event, _window, cx| {
-                if let InputEvent::Change = event {
-                    value_clone.update(cx, |v, cx| {
-                        *v = _input.read(cx).text().to_string();
-                        cx.notify();
-                    });
-                }
-            })
-            .detach();
-
-            self.field_inputs.push(input);
-        }
-
-        // Clear test result
-        self.test_result.update(cx, |result, cx| {
-            *result = None;
-            cx.notify();
-        });
-
-        cx.notify();
     }
 
     fn build_connection(&self, cx: &App) -> DbConnectionConfig {
@@ -406,7 +349,6 @@ impl Render for DbConnectionForm {
             Ok(false) => "✗ Connection failed".to_string(),
             Err(e) => format!("✗ {}", e),
         });
-        let current_db_type = *self.current_db_type.read(cx);
 
         // Modal overlay
         div()
@@ -421,7 +363,7 @@ impl Render for DbConnectionForm {
                 v_flex()
                     .gap_4()
                     .p_6()
-                    .w(gpui::px(500.))
+                    .w(px(500.))
                     .bg(cx.theme().background)
                     .border_1()
                     .border_color(cx.theme().border)
@@ -449,27 +391,22 @@ impl Render for DbConnectionForm {
                     )
                     .child(
                         // Form fields
-                        v_flex()
-                            .gap_3()
+                        v_form()
+                            .layout(Axis::Horizontal)
+                            .with_size(Size::Small)
+                            .columns(1)
+                            .label_width(px(100.))
                             .children(
                                 self.config
                                     .fields
                                     .iter()
                                     .enumerate()
-                                    .map(|(i, field)| {
-                                        v_flex()
-                                            .gap_1()
-                                            .child(
-                                                div()
-                                                    .text_sm()
-                                                    .font_medium()
-                                                    .text_color(cx.theme().foreground)
-                                                    .child(format!(
-                                                        "{}{}",
-                                                        field.label,
-                                                        if field.required { " *" } else { "" }
-                                                    )),
-                                            )
+                                    .map(|(i, field_info)| {
+                                        field()
+                                            .label(field_info.label.clone())
+                                            .required(field_info.required)
+                                            .items_center()
+                                            .label_justify_end()
                                             .child(Input::new(&self.field_inputs[i]).w_full())
                                     }),
                             ),

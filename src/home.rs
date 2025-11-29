@@ -12,6 +12,7 @@ use core::themes::SwitchThemeMode;
 use db::{DatabaseType, DbConnectionConfig};
 use db_view::database_tab::DatabaseTabContent;
 use db_view::db_connection_form::{DbConnectionForm, DbConnectionFormEvent, DbFormConfig};
+use gpui_component::menu::DropdownMenu;
 use crate::setting_tab::SettingsTabContent;
 
 // HomePage Entity - 管理 home 页面的所有状态
@@ -277,24 +278,26 @@ impl HomePage {
                 h_flex()
                     .gap_2()
                     .child(
-                        DropdownButton::new("new-connect-dropdown")
-                            .button(
-                                Button::new("new-connect-button")
-                                    .icon(IconName::Plus)
-                                    .label("NEW CONNECT")
-                                    .with_size(Size::Medium)
-                            )
+                        Button::new("new-connect-button")
+                            .icon(IconName::Plus)
+                            .with_size(Size::Large)
                             .dropdown_menu(move |menu, window, _cx| {
                                 menu.item(
-                                    PopupMenuItem::new("新建 MySQL")
+                                    PopupMenuItem::new("工作区")
+                                                .icon(IconName::WindowRestore)
+                                                .on_click(window.listener_for(&view, move |this, _, window, cx| {
+                                                    this.editing_connection_id = None;
+                                                    this.show_connection_form(DatabaseType::MySQL, window, cx);
+                                                }))
+                                ).item(
+                                    PopupMenuItem::new("MySQL")
                                         .icon(IconName::DATABASE)
                                         .on_click(window.listener_for(&view, move |this, _, window, cx| {
                                             this.editing_connection_id = None;
                                             this.show_connection_form(DatabaseType::MySQL, window, cx);
                                         }))
-                                )
-                                .item(
-                                    PopupMenuItem::new("新建 PostgreSQL")
+                                ).item(
+                                    PopupMenuItem::new("PostgreSQL")
                                         .icon(IconName::DATABASE)
                                         .on_click(window.listener_for(&view, move |this, _, window, cx| {
                                             this.editing_connection_id = None;
