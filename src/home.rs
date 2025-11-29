@@ -603,6 +603,9 @@ impl TabContent for HomeTabContent {
         TabContentType::Custom("home".to_string())
     }
 
+    fn width_size(&self) -> Option<Size> {
+        Some(Size::Small)
+    }
     fn as_any(&self) -> &dyn Any {
         self
     }

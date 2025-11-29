@@ -13,7 +13,7 @@ use gpui_component::{
 
 use crate::results_delegate::ResultsDelegate;
 use core::tab_container::{TabContent, TabContentType};
-use db::{DbConnectionConfig, GlobalDbState};
+use db::GlobalDbState;
 // ============================================================================
 // Table Data Tab Content - Display table rows
 // ============================================================================
@@ -200,7 +200,7 @@ impl TabContent for TableDataTabContent {
             )
             .child(
                 // Table
-                v_flex()
+                div()
                     .flex_1()
                     .bg(cx.theme().background)
                     .border_1()

@@ -189,7 +189,12 @@ impl Render for SqlResultTabContainer {
                             } else {
                                 // Show individual result table
                                 tabs.get(active_idx - 1)
-                                    .map(|tab| Table::new(&tab.table.clone()).into_any_element())
+                                    .map(|tab| {
+                                        div()
+                                            .size_full()
+                                            .child(Table::new(&tab.table.clone()))
+                                            .into_any_element()
+                                    })
                                     .unwrap_or_else(|| div().into_any_element())
                             }
                         )

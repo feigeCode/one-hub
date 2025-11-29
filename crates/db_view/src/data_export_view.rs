@@ -1,7 +1,4 @@
-use gpui::{
-    div, App, AppContext, ClickEvent, Context, Entity, FocusHandle, Focusable,
-    IntoElement, ParentElement, Render, Styled, Window,
-};
+use gpui::{div, App, AppContext, ClickEvent, Context, Entity, FocusHandle, Focusable, IntoElement, ParentElement, PathPromptOptions, Render, Styled, Window};
 use gpui_component::{
     button::{Button, ButtonVariants as _},
     h_flex,
@@ -10,7 +7,7 @@ use gpui_component::{
     v_flex, ActiveTheme, Sizable,
 };
 
-use db::{DataExporter, DataFormat, DbConnectionConfig, ExportConfig, GlobalDbState};
+use db::{DataExporter, DataFormat, ExportConfig, GlobalDbState};
 
 pub struct DataExportView {
     connection_id: String,
@@ -64,19 +61,16 @@ impl DataExportView {
     fn select_output(&mut self, _window: &mut Window, cx: &mut App) {
         let pending = self.pending_output_path.clone();
         let status = self.status.clone();
-
+        let future = cx.prompt_for_paths(PathPromptOptions {
+            files: false,
+            multiple: false,
+            directories: true,
+            prompt: Some("选择导出目录".into()),
+        });
         // 使用异步文件选择器
         cx.spawn(async move |cx| {
-            let file = rfd::AsyncFileDialog::new()
-                .add_filter("SQL Files", &["sql"])
-                .add_filter("JSON Files", &["json"])
-                .add_filter("CSV Files", &["csv"])
-                .add_filter("All Files", &["*"])
-                .save_file()
-                .await;
-
-            if let Some(file) = file {
-                let path = file.path().to_string_lossy().to_string();
+            if let Ok(Ok(Some(paths))) = future.await {
+                let path = paths.first().unwrap().to_string_lossy().to_string();
                 let _ = cx.update(|cx| {
                     pending.update(cx, |p, cx| {
                         *p = Some(path.clone());

@@ -1,9 +1,9 @@
 use std::any::Any;
 use std::sync::Arc;
 
+use core::gpui_tokio::Tokio;
 use core::tab_container::{TabContent, TabContentType};
 use db::{ColumnInfo, DataTypeCategory, DataTypeInfo, DatabaseType, GlobalDbState};
-use gpui::StatefulInteractiveElement as _;
 use gpui::{div, px, AnyElement, App, AppContext, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement, ParentElement, Render, SharedString, Styled, Window};
 use gpui_component::{
     button::{Button, ButtonVariants as _, DropdownButton},
@@ -11,7 +11,7 @@ use gpui_component::{
     input::{Input, InputState},
     menu::PopupMenuItem,
     switch::Switch,
-    v_flex, ActiveTheme, IconName, Sizable,
+    v_flex, ActiveTheme, IconName, Sizable, StyledExt as _,
 };
 
 /// 字段行
@@ -28,7 +28,7 @@ struct FieldRow {
 }
 
 /// 表设计器视图
-/// TODO 功能未完成
+/// Visual table designer for creating and editing database tables
 pub struct TableDesignerView {
     database_name: String,
     table_name: Option<String>,
@@ -139,17 +139,16 @@ impl TableDesignerView {
 
     fn load_data_types(connection_id: &str, cx: &mut App) -> Vec<DataTypeInfo> {
         let global_state = cx.global::<GlobalDbState>();
-        
-        // 尝试同步获取 config（这里需要异步，但为了简化先用默认值）
-        // 实际使用中应该在异步上下文中调用
-        let rt = tokio::runtime::Handle::try_current();
-        if let Ok(handle) = rt {
-            if let Some(config) = handle.block_on(global_state.get_config(connection_id)) {
-                if let Ok(plugin) = global_state.db_manager.get_plugin(&config.database_type) {
-                    return plugin.get_data_types();
-                }
+
+        // Use Tokio::block_on to execute async operations from sync context
+        let config = Tokio::block_on(cx, global_state.get_config(connection_id));
+
+        if let Some(config) = config {
+            if let Ok(plugin) = global_state.db_manager.get_plugin(&config.database_type) {
+                return plugin.get_data_types();
             }
         }
+
         vec![]
     }
 
@@ -251,10 +250,12 @@ impl TableDesignerView {
     }
 
     fn add_field(&mut self, window: &mut Window, cx: &mut App) {
-        let mut next_id_val = self.next_id.write().unwrap();
-        let field_id = *next_id_val;
-        *next_id_val += 1;
-        drop(next_id_val);
+        let field_id = {
+            let mut next_id_val = self.next_id.write().unwrap();
+            let id = *next_id_val;
+            *next_id_val += 1;
+            id
+        };
 
         let name_input = cx.new(|cx| InputState::new(window, cx).placeholder("field_name"));
         let type_input = cx.new(|cx| InputState::new(window, cx).placeholder("Select type"));
@@ -263,8 +264,7 @@ impl TableDesignerView {
         let default_value = cx.new(|cx| InputState::new(window, cx).placeholder("NULL"));
         let comment = cx.new(|cx| InputState::new(window, cx).placeholder("Comment"));
 
-        let mut fields_vec = self.fields.write().unwrap();
-        fields_vec.push(FieldRow {
+        self.fields.write().unwrap().push(FieldRow {
             id: field_id,
             name_input,
             type_input,
@@ -274,66 +274,72 @@ impl TableDesignerView {
             comment,
             selected_type: cx.new(|_| None),
         });
-        drop(fields_vec);
-        
+
         self.update_preview_sql(cx);
     }
 
     fn delete_field(&mut self, field_id: usize, _window: &mut Window, cx: &mut App) {
-        let mut fields_vec = self.fields.write().unwrap();
-        if let Some(pos) = fields_vec.iter().position(|f| f.id == field_id) {
-            fields_vec.remove(pos);
-            drop(fields_vec);
-            self.status_msg.update(cx, |s, cx| {
-                *s = "Field deleted (unsaved)".to_string();
-                cx.notify();
-            });
-            self.update_preview_sql(cx);
+        {
+            let mut fields_vec = self.fields.write().unwrap();
+            if let Some(pos) = fields_vec.iter().position(|f| f.id == field_id) {
+                fields_vec.remove(pos);
+            } else {
+                return; // Field not found, no need to update
+            }
         }
+
+        self.status_msg.update(cx, |s, cx| {
+            *s = "Field deleted (unsaved)".to_string();
+            cx.notify();
+        });
+        self.update_preview_sql(cx);
     }
 
     fn select_data_type(&mut self, field_id: usize, data_type: String, window: &mut Window, cx: &mut App) {
-        let fields_vec = self.fields.read().unwrap();
-        if let Some(field) = fields_vec.iter().find(|f| f.id == field_id) {
-            field.type_input.update(cx, |state, cx| {
-                state.replace(data_type.clone(), window, cx);
-            });
-            field.selected_type.update(cx, |t, cx| {
-                *t = Some(data_type);
-                cx.notify();
-            });
+        {
+            let fields_vec = self.fields.read().unwrap();
+            if let Some(field) = fields_vec.iter().find(|f| f.id == field_id) {
+                field.type_input.update(cx, |state, cx| {
+                    state.replace(data_type.clone(), window, cx);
+                });
+                field.selected_type.update(cx, |t, cx| {
+                    *t = Some(data_type);
+                    cx.notify();
+                });
+            }
         }
-        drop(fields_vec);
         self.update_preview_sql(cx);
     }
 
     fn toggle_nullable(&mut self, field_id: usize, cx: &mut App) {
-        let fields_vec = self.fields.read().unwrap();
-        if let Some(field) = fields_vec.iter().find(|f| f.id == field_id) {
-            field.nullable.update(cx, |val, cx| {
-                *val = !*val;
-                cx.notify();
-            });
+        {
+            let fields_vec = self.fields.read().unwrap();
+            if let Some(field) = fields_vec.iter().find(|f| f.id == field_id) {
+                field.nullable.update(cx, |val, cx| {
+                    *val = !*val;
+                    cx.notify();
+                });
+            }
         }
-        drop(fields_vec);
         self.update_preview_sql(cx);
     }
 
     fn toggle_primary_key(&mut self, field_id: usize, cx: &mut App) {
-        let fields_vec = self.fields.read().unwrap();
-        if let Some(field) = fields_vec.iter().find(|f| f.id == field_id) {
-            field.primary_key.update(cx, |val, cx| {
-                *val = !*val;
-                cx.notify();
-            });
+        {
+            let fields_vec = self.fields.read().unwrap();
+            if let Some(field) = fields_vec.iter().find(|f| f.id == field_id) {
+                field.primary_key.update(cx, |val, cx| {
+                    *val = !*val;
+                    cx.notify();
+                });
+            }
         }
-        drop(fields_vec);
         self.update_preview_sql(cx);
     }
 
     fn update_preview_sql(&mut self, cx: &mut App) {
         let table_name = self.table_name_input.read(cx).text().to_string();
-        
+
         if table_name.trim().is_empty() {
             self.preview_sql.update(cx, |sql, cx| {
                 *sql = "-- Enter table name to preview SQL".to_string();
@@ -342,44 +348,47 @@ impl TableDesignerView {
             return;
         }
 
-        let fields_vec = self.fields.read().unwrap();
-        let mut columns = Vec::new();
+        let columns = {
+            let fields_vec = self.fields.read().unwrap();
+            let mut columns = Vec::new();
 
-        for field in fields_vec.iter() {
-            let name = field.name_input.read(cx).text().to_string();
-            let data_type = field.type_input.read(cx).text().to_string();
-            
-            if name.trim().is_empty() || data_type.trim().is_empty() {
-                continue;
+            for field in fields_vec.iter() {
+                let name = field.name_input.read(cx).text().to_string();
+                let data_type = field.type_input.read(cx).text().to_string();
+
+                if name.trim().is_empty() || data_type.trim().is_empty() {
+                    continue;
+                }
+
+                let nullable = *field.nullable.read(cx);
+                let primary_key = *field.primary_key.read(cx);
+                let default_value_text = field.default_value.read(cx).text().to_string();
+                let comment_text = field.comment.read(cx).text().to_string();
+
+                columns.push(ColumnInfo {
+                    name,
+                    data_type,
+                    is_nullable: nullable,
+                    is_primary_key: primary_key,
+                    default_value: if default_value_text.trim().is_empty() {
+                        None
+                    } else {
+                        Some(default_value_text)
+                    },
+                    comment: if comment_text.trim().is_empty() {
+                        None
+                    } else {
+                        Some(comment_text)
+                    },
+                });
             }
 
-            let nullable = *field.nullable.read(cx);
-            let primary_key = *field.primary_key.read(cx);
-            let default_value_text = field.default_value.read(cx).text().to_string();
-            let comment_text = field.comment.read(cx).text().to_string();
-
-            columns.push(ColumnInfo {
-                name,
-                data_type,
-                is_nullable: nullable,
-                is_primary_key: primary_key,
-                default_value: if default_value_text.trim().is_empty() {
-                    None
-                } else {
-                    Some(default_value_text)
-                },
-                comment: if comment_text.trim().is_empty() {
-                    None
-                } else {
-                    Some(comment_text)
-                },
-            });
-        }
-        drop(fields_vec);
+            columns
+        };
 
         if columns.is_empty() {
             self.preview_sql.update(cx, |sql, cx| {
-                *sql = "-- Add at least one column to preview SQL".to_string();
+                *sql = "-- Add at least one valid column to preview SQL".to_string();
                 cx.notify();
             });
             return;
@@ -422,42 +431,45 @@ impl TableDesignerView {
 
     fn handle_save(&mut self, _window: &mut Window, cx: &mut App) {
         let table_name = self.table_name_input.read(cx).text().to_string();
-        
+
         if table_name.trim().is_empty() {
             self.status_msg.update(cx, |s, cx| {
-                *s = "Table name is required".to_string();
+                *s = "Error: Table name is required".to_string();
                 cx.notify();
             });
             return;
         }
 
-        // 收集字段定义
+        // Collect field definitions and validate
         let fields_vec = self.fields.read().unwrap();
         let mut columns = Vec::new();
 
         for field in fields_vec.iter() {
             let name = field.name_input.read(cx).text().to_string();
             let data_type = field.type_input.read(cx).text().to_string();
-            let nullable = *field.nullable.read(cx);
-            let primary_key = *field.primary_key.read(cx);
-            let default_value_text = field.default_value.read(cx).text().to_string();
-            let comment_text = field.comment.read(cx).text().to_string();
 
             if name.trim().is_empty() {
+                drop(fields_vec);
                 self.status_msg.update(cx, |s, cx| {
-                    *s = "All fields must have a name".to_string();
+                    *s = "Error: All fields must have a name".to_string();
                     cx.notify();
                 });
                 return;
             }
 
             if data_type.trim().is_empty() {
+                drop(fields_vec);
                 self.status_msg.update(cx, |s, cx| {
-                    *s = format!("Field '{}' must have a data type", name);
+                    *s = format!("Error: Field '{}' must have a data type", name);
                     cx.notify();
                 });
                 return;
             }
+
+            let nullable = *field.nullable.read(cx);
+            let primary_key = *field.primary_key.read(cx);
+            let default_value_text = field.default_value.read(cx).text().to_string();
+            let comment_text = field.comment.read(cx).text().to_string();
 
             columns.push(ColumnInfo {
                 name,
@@ -480,13 +492,13 @@ impl TableDesignerView {
 
         if columns.is_empty() {
             self.status_msg.update(cx, |s, cx| {
-                *s = "Table must have at least one column".to_string();
+                *s = "Error: Table must have at least one valid column".to_string();
                 cx.notify();
             });
             return;
         }
 
-        // 执行创建或修改
+        // Execute create or modify
         let global_state = cx.global::<GlobalDbState>().clone();
         let connection_id = self.connection_id.clone();
         let database_name = self.database_name.clone();
@@ -494,7 +506,7 @@ impl TableDesignerView {
         let is_new = self.is_new_table;
 
         self.status_msg.update(cx, |s, cx| {
-            *s = "Saving...".to_string();
+            *s = "Saving table...".to_string();
             cx.notify();
         });
 
@@ -504,7 +516,7 @@ impl TableDesignerView {
                 Err(e) => {
                     cx.update(|cx| {
                         status_msg.update(cx, |s, cx| {
-                            *s = format!("Failed to get plugin: {}", e);
+                            *s = format!("Error: Failed to get database connection: {}", e);
                             cx.notify();
                         });
                     }).ok();
@@ -513,10 +525,10 @@ impl TableDesignerView {
             };
 
             if is_new {
-                // 创建新表
+                // Create new table
                 let request = db::CreateTableRequest {
                     database_name,
-                    table_name,
+                    table_name: table_name.clone(),
                     columns,
                     if_not_exists: true,
                 };
@@ -528,7 +540,7 @@ impl TableDesignerView {
                             Ok(_) => {
                                 cx.update(|cx| {
                                     status_msg.update(cx, |s, cx| {
-                                        *s = "Table created successfully".to_string();
+                                        *s = format!("✓ Table '{}' created successfully", table_name);
                                         cx.notify();
                                     });
                                 }).ok();
@@ -536,7 +548,7 @@ impl TableDesignerView {
                             Err(e) => {
                                 cx.update(|cx| {
                                     status_msg.update(cx, |s, cx| {
-                                        *s = format!("Failed to create table: {}", e);
+                                        *s = format!("Error: Failed to create table: {}", e);
                                         cx.notify();
                                     });
                                 }).ok();
@@ -546,17 +558,17 @@ impl TableDesignerView {
                     Err(e) => {
                         cx.update(|cx| {
                             status_msg.update(cx, |s, cx| {
-                                *s = format!("Failed to generate SQL: {}", e);
+                                *s = format!("Error: Failed to generate SQL: {}", e);
                                 cx.notify();
                             });
                         }).ok();
                     }
                 }
             } else {
-                // TODO: 实现ALTER TABLE逻辑
+                // Implement ALTER TABLE logic
                 cx.update(|cx| {
                     status_msg.update(cx, |s, cx| {
-                        *s = "Alter table not yet implemented".to_string();
+                        *s = "Error: Alter table not yet implemented. Please drop and recreate the table.".to_string();
                         cx.notify();
                     });
                 }).ok();
@@ -803,18 +815,19 @@ impl Render for TableDesignerView {
                     .child(div().w(px(200.0)).child("Comment"))
                     .child(div().w(px(60.0)).child("Actions"))
             )
-            .child({
+            .child(
                 // Fields list
-                let mut fields_container = v_flex()
-                    .id("fields")
+                div()
                     .flex_1()
-                    .overflow_scroll();
-                for field in fields_vec.iter() {
-                    fields_container = fields_container.child(self.render_field_row(field, window, cx));
-                }
-                
-                fields_container
-            })
+                    .overflow_hidden()
+                    .child({
+                        let mut fields_container = v_flex().id("fields");
+                        for field in fields_vec.iter() {
+                            fields_container = fields_container.child(self.render_field_row(field, window, cx));
+                        }
+                        fields_container.scrollable(gpui::Axis::Vertical)
+                    })
+            )
             .child(
                 // SQL Preview
                 v_flex()

@@ -15,7 +15,6 @@ tracing.workspace = true
 hex = "0.4"
 futures = "0.3"
 rand = "0.8"
-rfd = "0.15"
 gpui.workspace = true
 db.workspace = true
 gpui-component = { workspace = true, features = ["tree-sitter-languages"] }
