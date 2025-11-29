@@ -26,10 +26,10 @@ impl ConnectionType {
     pub fn icon(&self) -> IconName {
         match self {
             ConnectionType::All => IconName::Menu,
-            ConnectionType::Database => IconName::DATABASE,
-            ConnectionType::SshSftp => IconName::File,
-            ConnectionType::Redis => IconName::File,
-            ConnectionType::MongoDB => IconName::File,
+            ConnectionType::Database => IconName::Database,
+            ConnectionType::SshSftp => IconName::Terminal,
+            ConnectionType::Redis => IconName::Redis,
+            ConnectionType::MongoDB => IconName::MongoDB,
         }
     }
 }

@@ -885,7 +885,7 @@ impl TabContent for TableDesignerView {
     }
 
     fn icon(&self) -> Option<IconName> {
-        Some(IconName::TABLE)
+        Some(IconName::Table)
     }
 
     fn closeable(&self) -> bool {

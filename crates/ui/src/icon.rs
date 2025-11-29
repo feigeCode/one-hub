@@ -90,10 +90,15 @@ pub enum IconName {
     WindowMaximize,
     WindowMinimize,
     WindowRestore,
-    DATABASE,
-    TABLE,
-    COLUMN,
-    KEY,
+    Database,
+    Table,
+    Column,
+    Key,
+    Redis,
+    Terminal,
+    Apps,
+    MongoDB,
+    
 }
 
 impl IconName {
@@ -181,10 +186,14 @@ impl IconName {
             Self::WindowMaximize => "icons/window-maximize.svg",
             Self::WindowMinimize => "icons/window-minimize.svg",
             Self::WindowRestore => "icons/window-restore.svg",
-            Self::DATABASE => "icons/database.svg",
-            Self::TABLE => "icons/table.svg",
-            Self::COLUMN => "icons/column.svg",
-            Self::KEY => "icons/key.svg",
+            Self::Database => "icons/database.svg",
+            Self::Table => "icons/table.svg",
+            Self::Column => "icons/column.svg",
+            Self::Key => "icons/key.svg",
+            Self::Redis => "icons/redis.svg",
+            Self::Terminal => "icons/terminal.svg",
+            Self::Apps => "icons/apps.svg",
+            Self::MongoDB => "icons/mongodb.svg",
         }
         .into()
     }

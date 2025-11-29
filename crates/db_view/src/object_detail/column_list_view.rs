@@ -68,7 +68,7 @@ impl TableDelegate for ColumnListDelegate {
                         .items_center()
                         .justify_center()
                         .text_color(cx.theme().primary)
-                        .child(Icon::new(IconName::KEY))
+                        .child(Icon::new(IconName::Key))
                 } else {
                     div()
                 }

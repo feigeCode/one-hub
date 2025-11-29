@@ -528,7 +528,7 @@ impl DatabaseTabContent {
             )
             .child(
                 Button::new("new-table")
-                    .icon(IconName::TABLE)
+                    .icon(IconName::Table)
                     .child("新建表")
                     .ghost()
                     .tooltip("新建表")

@@ -284,21 +284,21 @@ impl HomePage {
                             .dropdown_menu(move |menu, window, _cx| {
                                 menu.item(
                                     PopupMenuItem::new("工作区")
-                                                .icon(IconName::WindowRestore)
+                                                .icon(IconName::Apps)
                                                 .on_click(window.listener_for(&view, move |this, _, window, cx| {
                                                     this.editing_connection_id = None;
                                                     this.show_connection_form(DatabaseType::MySQL, window, cx);
                                                 }))
                                 ).item(
                                     PopupMenuItem::new("MySQL")
-                                        .icon(IconName::DATABASE)
+                                        .icon(IconName::Database)
                                         .on_click(window.listener_for(&view, move |this, _, window, cx| {
                                             this.editing_connection_id = None;
                                             this.show_connection_form(DatabaseType::MySQL, window, cx);
                                         }))
                                 ).item(
                                     PopupMenuItem::new("PostgreSQL")
-                                        .icon(IconName::DATABASE)
+                                        .icon(IconName::Database)
                                         .on_click(window.listener_for(&view, move |this, _, window, cx| {
                                             this.editing_connection_id = None;
                                             this.show_connection_form(DatabaseType::PostgreSQL, window, cx);

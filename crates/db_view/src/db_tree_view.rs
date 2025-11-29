@@ -378,16 +378,16 @@ impl DbTreeView {
         let node = self.db_nodes.get(node_id);
         match node.map(|n| &n.node_type) {
             Some(DbNodeType::Connection) => IconName::Folder,
-            Some(DbNodeType::Database) => IconName::DATABASE,
+            Some(DbNodeType::Database) => IconName::Database,
             Some(DbNodeType::TablesFolder) | Some(DbNodeType::ViewsFolder) |
             Some(DbNodeType::FunctionsFolder) | Some(DbNodeType::ProceduresFolder) |
             Some(DbNodeType::TriggersFolder) | Some(DbNodeType::SequencesFolder) => {
                 if is_expanded { IconName::FolderOpen } else { IconName::Folder }
             }
-            Some(DbNodeType::Table) => IconName::TABLE,
-            Some(DbNodeType::View) => IconName::TABLE,
+            Some(DbNodeType::Table) => IconName::Table,
+            Some(DbNodeType::View) => IconName::Table,
             Some(DbNodeType::Function) | Some(DbNodeType::Procedure) => IconName::Settings,
-            Some(DbNodeType::Column) => IconName::COLUMN,
+            Some(DbNodeType::Column) => IconName::Column,
             Some(DbNodeType::ColumnsFolder) | Some(DbNodeType::IndexesFolder) => {
                 if is_expanded { IconName::FolderOpen } else { IconName::Folder }
             }

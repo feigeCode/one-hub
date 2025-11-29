@@ -1,14 +1,42 @@
-use db::DatabaseType;
-use db::DbConnectionConfig;
-use gpui::{div, px, App, AppContext, Axis, ClickEvent, Context, Entity, EventEmitter, FocusHandle, Focusable, IntoElement, ParentElement, Render, Styled, Window};
-use gpui_component::form::{field, v_form};
+use gpui::{div, px, prelude::*, App, AppContext, Axis, ClickEvent, Context, Entity, EventEmitter, FocusHandle, Focusable, IntoElement, ParentElement, Render, Styled, Window};
 use gpui_component::{
     button::{Button, ButtonVariants as _},
     h_flex,
-    input::{Input, InputEvent, InputState}
-    ,
+    input::{Input, InputEvent, InputState},
+    tab::{Tab, TabBar},
     v_flex, ActiveTheme, Disableable, Sizable, Size, StyledExt,
 };
+use gpui_component::form::{field, v_form};
+
+use db::{DatabaseType, DbConnectionConfig};
+
+/// Represents a tab group containing multiple fields
+#[derive(Clone, Debug)]
+pub struct TabGroup {
+    pub name: String,
+    pub label: String,
+    pub fields: Vec<FormField>,
+}
+
+impl TabGroup {
+    pub fn new(name: impl Into<String>, label: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            label: label.into(),
+            fields: Vec::new(),
+        }
+    }
+
+    pub fn field(mut self, field: FormField) -> Self {
+        self.fields.push(field);
+        self
+    }
+
+    pub fn fields(mut self, fields: Vec<FormField>) -> Self {
+        self.fields = fields;
+        self
+    }
+}
 
 /// Represents a field in the connection form
 #[derive(Clone, Debug)]
@@ -65,7 +93,7 @@ impl FormField {
 pub struct DbFormConfig {
     pub db_type: DatabaseType,
     pub title: String,
-    pub fields: Vec<FormField>,
+    pub tab_groups: Vec<TabGroup>,
 }
 
 impl DbFormConfig {
@@ -73,27 +101,34 @@ impl DbFormConfig {
     pub fn mysql() -> Self {
         Self {
             db_type: DatabaseType::MySQL,
-            title: "Connect to MySQL".to_string(),
-            fields: vec![
-                FormField::new("name", "Name", FormFieldType::Text)
-                    .placeholder("My MySQL Database")
-                    .default("Local MySQL"),
-                FormField::new("host", "Host", FormFieldType::Text)
-                    .placeholder("localhost")
-                    .default("localhost"),
-                FormField::new("port", "Port", FormFieldType::Number)
-                    .placeholder("3306")
-                    .default("3306"),
-                FormField::new("username", "Username", FormFieldType::Text)
-                    .placeholder("root")
-                    .default("root"),
-                FormField::new("password", "Password", FormFieldType::Password)
-                    .placeholder("Enter password")
-                    .default("hf123456"),
-                FormField::new("database", "Database", FormFieldType::Text)
-                    .optional()
-                    .placeholder("database name (optional)")
-                    .default("ai_app"),
+            title: "新建连接 (MySQL)".to_string(),
+            tab_groups: vec![
+                TabGroup::new("general", "常规").fields(vec![
+                    FormField::new("name", "连接名称", FormFieldType::Text)
+                        .placeholder("My MySQL Database")
+                        .default("Local MySQL"),
+                    FormField::new("host", "主机", FormFieldType::Text)
+                        .placeholder("localhost")
+                        .default("localhost"),
+                    FormField::new("port", "端口", FormFieldType::Number)
+                        .placeholder("3306")
+                        .default("3306"),
+                    FormField::new("username", "用户名", FormFieldType::Text)
+                        .placeholder("root")
+                        .default("root"),
+                    FormField::new("password", "密码", FormFieldType::Password)
+                        .placeholder("Enter password")
+                        .default("hf123456"),
+                    FormField::new("database", "数据库", FormFieldType::Text)
+                        .optional()
+                        .placeholder("database name (optional)")
+                        .default("ai_app"),
+                ]),
+                TabGroup::new("advanced", "高级"),
+                TabGroup::new("ssl", "SSL"),
+                TabGroup::new("ssh", "SSH"),
+                TabGroup::new("http", "HTTP"),
+                TabGroup::new("notes", "备注"),
             ],
         }
     }
@@ -102,41 +137,32 @@ impl DbFormConfig {
     pub fn postgres() -> Self {
         Self {
             db_type: DatabaseType::PostgreSQL,
-            title: "Connect to PostgreSQL".to_string(),
-            fields: vec![
-                FormField::new("name", "Name", FormFieldType::Text)
-                    .placeholder("My PostgreSQL Database")
-                    .default("Local PostgreSQL"),
-                FormField::new("host", "Host", FormFieldType::Text)
-                    .placeholder("localhost")
-                    .default("localhost"),
-                FormField::new("port", "Port", FormFieldType::Number)
-                    .placeholder("5432")
-                    .default("5432"),
-                FormField::new("username", "Username", FormFieldType::Text)
-                    .placeholder("postgres")
-                    .default("postgres"),
-                FormField::new("password", "Password", FormFieldType::Password)
-                    .placeholder("Enter password"),
-                FormField::new("database", "Database", FormFieldType::Text)
-                    .optional()
-                    .placeholder("database name (optional)"),
-            ],
-        }
-    }
-
-    /// Generic form configuration
-    pub fn generic(db_type: DatabaseType, title: String) -> Self {
-        Self {
-            db_type,
-            title,
-            fields: vec![
-                FormField::new("name", "Connection Name", FormFieldType::Text),
-                FormField::new("host", "Host", FormFieldType::Text),
-                FormField::new("port", "Port", FormFieldType::Number),
-                FormField::new("username", "Username", FormFieldType::Text),
-                FormField::new("password", "Password", FormFieldType::Password),
-                FormField::new("database", "Database", FormFieldType::Text).optional(),
+            title: "新建连接 (PostgreSQL)".to_string(),
+            tab_groups: vec![
+                TabGroup::new("general", "常规").fields(vec![
+                    FormField::new("name", "连接名称", FormFieldType::Text)
+                        .placeholder("My PostgreSQL Database")
+                        .default("Local PostgreSQL"),
+                    FormField::new("host", "主机", FormFieldType::Text)
+                        .placeholder("localhost")
+                        .default("localhost"),
+                    FormField::new("port", "端口", FormFieldType::Number)
+                        .placeholder("5432")
+                        .default("5432"),
+                    FormField::new("username", "用户名", FormFieldType::Text)
+                        .placeholder("postgres")
+                        .default("postgres"),
+                    FormField::new("password", "密码", FormFieldType::Password)
+                        .placeholder("Enter password"),
+                    FormField::new("database", "数据库", FormFieldType::Text)
+                        .optional()
+                        .placeholder("database name (optional)"),
+                ]),
+                TabGroup::new("advanced", "高级"),
+                TabGroup::new("ssl", "SSL"),
+                TabGroup::new("ssh", "SSH"),
+                TabGroup::new("http", "HTTP"),
+                TabGroup::new("notes", "备注"),
             ],
         }
     }
@@ -153,6 +179,7 @@ pub struct DbConnectionForm {
     config: DbFormConfig,
     current_db_type: Entity<DatabaseType>,
     focus_handle: FocusHandle,
+    active_tab: usize,
     // Field values stored as Entity<String> for reactivity
     field_values: Vec<(String, Entity<String>)>,
     field_inputs: Vec<Entity<InputState>>,
@@ -169,37 +196,39 @@ impl DbConnectionForm {
         let mut field_values = Vec::new();
         let mut field_inputs = Vec::new();
 
-        for field in &config.fields {
-            let value = cx.new(|_| field.default_value.clone());
-            field_values.push((field.name.clone(), value.clone()));
+        for tab_group in &config.tab_groups {
+            for field in &tab_group.fields {
+                let value = cx.new(|_| field.default_value.clone());
+                field_values.push((field.name.clone(), value.clone()));
 
-            let input = cx.new(|cx| {
-                let mut input_state = InputState::new(window, cx)
-                    .placeholder(&field.placeholder);
+                let input = cx.new(|cx| {
+                    let mut input_state = InputState::new(window, cx)
+                        .placeholder(&field.placeholder);
 
-                // Set password mode if needed
-                if field.field_type == FormFieldType::Password {
-                    input_state = input_state.masked(true);
-                }
+                    // Set password mode if needed
+                    if field.field_type == FormFieldType::Password {
+                        input_state = input_state.masked(true);
+                    }
 
-                input_state.set_value(field.default_value.clone(), window, cx);
-                input_state
-            });
+                    input_state.set_value(field.default_value.clone(), window, cx);
+                    input_state
+                });
 
-            // Subscribe to input changes
-            let value_clone = value.clone();
-            cx.subscribe_in(&input, window, move |_form, _input, event, _window, cx| {
-                if let InputEvent::Change = event {
-                    value_clone.update(cx, |v, cx| {
-                        // Get the new text from the input
-                        *v = _input.read(cx).text().to_string();
-                        cx.notify();
-                    });
-                }
-            })
-            .detach();
+                // Subscribe to input changes
+                let value_clone = value.clone();
+                cx.subscribe_in(&input, window, move |_form, _input, event, _window, cx| {
+                    if let InputEvent::Change = event {
+                        value_clone.update(cx, |v, cx| {
+                            // Get the new text from the input
+                            *v = _input.read(cx).text().to_string();
+                            cx.notify();
+                        });
+                    }
+                })
+                .detach();
 
-            field_inputs.push(input);
+                field_inputs.push(input);
+            }
         }
 
         let is_testing = cx.new(|_| false);
@@ -209,6 +238,7 @@ impl DbConnectionForm {
             config,
             current_db_type,
             focus_handle,
+            active_tab: 0,
             field_values,
             field_inputs,
             is_testing,
@@ -272,11 +302,13 @@ impl DbConnectionForm {
     }
 
     fn validate(&self, cx: &App) -> Result<(), String> {
-        for field in &self.config.fields {
-            if field.required {
-                let value = self.get_field_value(&field.name, cx);
-                if value.trim().is_empty() {
-                    return Err(format!("{} is required", field.label));
+        for tab_group in &self.config.tab_groups {
+            for field in &tab_group.fields {
+                if field.required {
+                    let value = self.get_field_value(&field.name, cx);
+                    if value.trim().is_empty() {
+                        return Err(format!("{} is required", field.label));
+                    }
                 }
             }
         }
@@ -345,10 +377,20 @@ impl Render for DbConnectionForm {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let is_testing = *self.is_testing.read(cx);
         let test_result_msg = self.test_result.read(cx).as_ref().map(|r| match r {
-            Ok(true) => "✓ Connection successful!".to_string(),
-            Ok(false) => "✗ Connection failed".to_string(),
+            Ok(true) => "✓ 连接成功!".to_string(),
+            Ok(false) => "✗ 连接失败".to_string(),
             Err(e) => format!("✗ {}", e),
         });
+
+        // Calculate field input indices for current tab
+        let mut field_input_offset = 0;
+        for (tab_idx, tab_group) in self.config.tab_groups.iter().enumerate() {
+            if tab_idx < self.active_tab {
+                field_input_offset += tab_group.fields.len();
+            }
+        }
+
+        let current_tab_fields = &self.config.tab_groups[self.active_tab].fields;
 
         // Modal overlay
         div()
@@ -363,7 +405,7 @@ impl Render for DbConnectionForm {
                 v_flex()
                     .gap_4()
                     .p_6()
-                    .w(px(500.))
+                    .w(px(600.))
                     .bg(cx.theme().background)
                     .border_1()
                     .border_color(cx.theme().border)
@@ -372,8 +414,9 @@ impl Render for DbConnectionForm {
                     .child(
                         // Header
                         h_flex()
-                            .justify_between()
+                            .relative()
                             .items_center()
+                            .justify_center()
                             .child(
                                 div()
                                     .text_xl()
@@ -382,52 +425,105 @@ impl Render for DbConnectionForm {
                                     .child(self.config.title.clone()),
                             )
                             .child(
-                                Button::new("close")
-                                    .ghost()
-                                    .with_size(Size::XSmall)
-                                    .label("✕")
-                                    .on_click(cx.listener(Self::handle_cancel)),
+                                div()
+                                    .absolute()
+                                    .right_0()
+                                    .child(
+                                        Button::new("close")
+                                            .ghost()
+                                            .with_size(Size::XSmall)
+                                            .label("✕")
+                                            .on_click(cx.listener(Self::handle_cancel)),
+                                    ),
                             ),
                     )
                     .child(
-                        // Form fields
-                        v_form()
-                            .layout(Axis::Horizontal)
-                            .with_size(Size::Small)
-                            .columns(1)
-                            .label_width(px(100.))
-                            .children(
-                                self.config
-                                    .fields
-                                    .iter()
-                                    .enumerate()
-                                    .map(|(i, field_info)| {
-                                        field()
-                                            .label(field_info.label.clone())
-                                            .required(field_info.required)
-                                            .items_center()
-                                            .label_justify_end()
-                                            .child(Input::new(&self.field_inputs[i]).w_full())
-                                    }),
+                        // Tab bar
+                        div()
+                            .flex()
+                            .justify_center()
+                            .child(
+                                TabBar::new("connection-tabs")
+                                    .with_size(Size::Small)
+                                    .selected_index(self.active_tab)
+                                    .on_click(cx.listener(|this, ix: &usize, _window, cx| {
+                                        this.active_tab = *ix;
+                                        cx.notify();
+                                    }))
+                                    .children(
+                                        self.config
+                                            .tab_groups
+                                            .iter()
+                                            .map(|tab| Tab::new().label(tab.label.clone())),
+                                    ),
                             ),
                     )
-                    .children(test_result_msg.map(|msg| {
-                        let is_success = msg.starts_with("✓");
+                    .child(
+                        // Form fields for active tab
                         div()
-                            .p_3()
-                            .rounded_md()
-                            .bg(if is_success {
-                                gpui::rgb(0xdcfce7)
-                            } else {
-                                gpui::rgb(0xfee2e2)
+                            .min_h(px(300.))
+                            .when(!current_tab_fields.is_empty(), |this| {
+                                this.child(
+                                    v_form()
+                                        .layout(Axis::Horizontal)
+                                        .with_size(Size::Small)
+                                        .columns(1)
+                                        .label_width(px(100.))
+                                        .children(
+                                            current_tab_fields
+                                                .iter()
+                                                .enumerate()
+                                                .map(|(i, field_info)| {
+                                                    let input_idx = field_input_offset + i;
+                                                    field()
+                                                        .label(field_info.label.clone())
+                                                        .required(field_info.required)
+                                                        .items_center()
+                                                        .label_justify_end()
+                                                        .child(Input::new(&self.field_inputs[input_idx]).w_full())
+                                                }),
+                                        ),
+                                )
                             })
-                            .text_color(if is_success {
-                                gpui::rgb(0x166534)
-                            } else {
-                                gpui::rgb(0x991b1b)
-                            })
-                            .child(msg)
-                    }))
+                            .when(current_tab_fields.is_empty(), |this| {
+                                this.child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .h_full()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child("此页签暂无配置项"),
+                                )
+                            }),
+                    )
+                    .child(
+                        // Test result message area (fixed height)
+                        div()
+                            .h(px(48.))
+                            .flex()
+                            .items_center()
+                            .when_some(test_result_msg, |this, msg| {
+                                let is_success = msg.starts_with("✓");
+                                this.child(
+                                    div()
+                                        .w_full()
+                                        .p_3()
+                                        .rounded_md()
+                                        .bg(if is_success {
+                                            gpui::rgb(0xdcfce7)
+                                        } else {
+                                            gpui::rgb(0xfee2e2)
+                                        })
+                                        .text_color(if is_success {
+                                            gpui::rgb(0x166534)
+                                        } else {
+                                            gpui::rgb(0x991b1b)
+                                        })
+                                        .child(msg),
+                                )
+                            }),
+                    )
                     .child(
                         // Action buttons
                         h_flex()
@@ -437,7 +533,7 @@ impl Render for DbConnectionForm {
                                 Button::new("cancel")
                                     .ghost()
                                     .with_size(Size::Medium)
-                                    .label("Cancel")
+                                    .label("取消")
                                     .on_click(cx.listener(Self::handle_cancel)),
                             )
                             .child(
@@ -445,9 +541,9 @@ impl Render for DbConnectionForm {
                                     .outline()
                                     .with_size(Size::Medium)
                                     .label(if is_testing {
-                                        "Testing..."
+                                        "测试中..."
                                     } else {
-                                        "Test Connection"
+                                        "测试连接"
                                     })
                                     .disabled(is_testing)
                                     .on_click(cx.listener(Self::handle_test_connection)),
@@ -456,7 +552,7 @@ impl Render for DbConnectionForm {
                                 Button::new("save")
                                     .primary()
                                     .with_size(Size::Medium)
-                                    .label("Save & Connect")
+                                    .label("好")
                                     .disabled(is_testing)
                                     .on_click(cx.listener(Self::handle_save)),
                             ),
