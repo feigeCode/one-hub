@@ -1,14 +1,49 @@
-use gpui::{div, px, prelude::*, App, AppContext, Axis, ClickEvent, Context, Entity, EventEmitter, FocusHandle, Focusable, IntoElement, ParentElement, Render, Styled, Window};
+use gpui::{div, px, prelude::*, App, AppContext, Axis, ClickEvent, Context, Entity, EventEmitter, FocusHandle, Focusable, IntoElement, ParentElement, Render, SharedString, Styled, Window};
 use gpui_component::{
     button::{Button, ButtonVariants as _},
+    form::{field, v_form},
     h_flex,
     input::{Input, InputEvent, InputState},
-    menu::{DropdownMenu as _, PopupMenuItem},
+    select::{Select, SelectItem, SelectState},
     tab::{Tab, TabBar},
     v_flex, ActiveTheme, Disableable, Sizable, Size, StyledExt,
 };
-use gpui_component::form::{field, v_form};
 use one_core::storage::{DatabaseType, DbConnectionConfig, StoredConnection, Workspace};
+
+/// Workspace select item for dropdown
+#[derive(Clone, Debug)]
+pub struct WorkspaceSelectItem {
+    pub id: Option<i64>,
+    pub name: String,
+}
+
+impl WorkspaceSelectItem {
+    pub fn none() -> Self {
+        Self {
+            id: None,
+            name: "无".to_string(),
+        }
+    }
+
+    pub fn from_workspace(ws: &Workspace) -> Self {
+        Self {
+            id: ws.id,
+            name: ws.name.clone(),
+        }
+    }
+}
+
+impl SelectItem for WorkspaceSelectItem {
+    type Value = Option<i64>;
+
+    fn title(&self) -> SharedString {
+        self.name.clone().into()
+    }
+
+    fn value(&self) -> &Self::Value {
+        &self.id
+    }
+}
 
 /// Represents a tab group containing multiple fields
 #[derive(Clone, Debug)]
@@ -185,8 +220,7 @@ pub struct DbConnectionForm {
     field_inputs: Vec<Entity<InputState>>,
     is_testing: Entity<bool>,
     test_result: Entity<Option<Result<bool, String>>>,
-    workspaces: Vec<Workspace>,
-    selected_workspace_id: Entity<Option<i64>>,
+    workspace_select: Entity<SelectState<Vec<WorkspaceSelectItem>>>,
 }
 
 impl DbConnectionForm {
@@ -235,7 +269,11 @@ impl DbConnectionForm {
 
         let is_testing = cx.new(|_| false);
         let test_result = cx.new(|_| None);
-        let selected_workspace_id = cx.new(|_| None);
+        
+        let workspace_items = vec![WorkspaceSelectItem::none()];
+        let workspace_select = cx.new(|cx| {
+            SelectState::new(workspace_items, Some(Default::default()), window, cx)
+        });
 
         Self {
             config,
@@ -246,13 +284,17 @@ impl DbConnectionForm {
             field_inputs,
             is_testing,
             test_result,
-            workspaces: Vec::new(),
-            selected_workspace_id,
+            workspace_select,
         }
     }
 
-    pub fn set_workspaces(&mut self, workspaces: Vec<Workspace>, cx: &mut Context<Self>) {
-        self.workspaces = workspaces;
+    pub fn set_workspaces(&mut self, workspaces: Vec<Workspace>, window: &mut Window, cx: &mut Context<Self>) {
+        let mut items = vec![WorkspaceSelectItem::none()];
+        items.extend(workspaces.iter().map(WorkspaceSelectItem::from_workspace));
+        
+        self.workspace_select.update(cx, |select, cx| {
+            select.set_items(items, window, cx);
+        });
         cx.notify();
     }
 
@@ -271,10 +313,15 @@ impl DbConnectionForm {
             }
         }
         
-        self.selected_workspace_id.update(cx, |ws_id, cx| {
-            *ws_id = connection.workspace_id;
-            cx.notify();
-        });
+        if let Some(ws_id) = connection.workspace_id {
+            self.workspace_select.update(cx, |select, cx| {
+                select.set_selected_value(&Some(ws_id), window, cx);
+            });
+        } else {
+            self.workspace_select.update(cx, |select, cx| {
+                select.set_selected_value(&None, window, cx);
+            });
+        }
     }
 
     fn set_field_value(&mut self, field_name: &str, value: &str, window: &mut Window, cx: &mut Context<Self>) {
@@ -298,6 +345,11 @@ impl DbConnectionForm {
     }
 
     fn build_connection(&self, cx: &App) -> DbConnectionConfig {
+        let workspace_id = self.workspace_select.read(cx)
+            .selected_value()
+            .cloned()
+            .flatten();
+        
         DbConnectionConfig {
             id: String::new(),
             database_type: self.current_db_type.read(cx).clone(),
@@ -317,7 +369,7 @@ impl DbConnectionForm {
                     Some(db)
                 }
             },
-            workspace_id: *self.selected_workspace_id.read(cx),
+            workspace_id,
         }
     }
 
@@ -484,7 +536,6 @@ impl Render for DbConnectionForm {
                             .min_h(px(300.))
                             .when(!current_tab_fields.is_empty(), |this| {
                                 let is_general_tab = self.active_tab == 0;
-                                let selected_ws_id = *self.selected_workspace_id.read(cx);
                                 
                                 this.child(
                                     v_form()
@@ -507,51 +558,12 @@ impl Render for DbConnectionForm {
                                                 }),
                                         )
                                         .when(is_general_tab, |form| {
-                                            let view = cx.entity();
-                                            let workspaces = self.workspaces.clone();
-                                            let selected_label = if let Some(ws_id) = selected_ws_id {
-                                                workspaces.iter()
-                                                    .find(|ws| ws.id == Some(ws_id))
-                                                    .map(|ws| ws.name.clone())
-                                                    .unwrap_or_else(|| "无".to_string())
-                                            } else {
-                                                "无".to_string()
-                                            };
-                                            
                                             form.child(
                                                 field()
                                                     .label("工作区")
                                                     .items_center()
                                                     .label_justify_end()
-                                                    .child(
-                                                        Button::new("workspace-dropdown")
-                                                            .w_full()
-                                                            .label(selected_label)
-                                                            .dropdown_menu(move |menu, window, _cx| {
-                                                                let mut m = menu.item(
-                                                                    PopupMenuItem::new("无")
-                                                                        .on_click(window.listener_for(&view, |this, _, _, cx| {
-                                                                            this.selected_workspace_id.update(cx, |ws_id, cx| {
-                                                                                *ws_id = None;
-                                                                                cx.notify();
-                                                                            });
-                                                                        }))
-                                                                );
-                                                                for ws in &workspaces {
-                                                                    let ws_id = ws.id;
-                                                                    m = m.item(
-                                                                        PopupMenuItem::new(ws.name.clone())
-                                                                            .on_click(window.listener_for(&view, move |this, _, _, cx| {
-                                                                                this.selected_workspace_id.update(cx, |ws_id_state, cx| {
-                                                                                    *ws_id_state = ws_id;
-                                                                                    cx.notify();
-                                                                                });
-                                                                            }))
-                                                                    );
-                                                                }
-                                                                m
-                                                            })
-                                                    )
+                                                    .child(Select::new(&self.workspace_select).w_full())
                                             )
                                         }),
                                 )

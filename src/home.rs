@@ -282,7 +282,7 @@ impl HomePage {
 
         // 设置工作区列表
         form.update(cx, |f, cx| {
-            f.set_workspaces(self.workspaces.clone(), cx);
+            f.set_workspaces(self.workspaces.clone(),window, cx);
         });
 
         // 如果是编辑模式，加载现有连接数据

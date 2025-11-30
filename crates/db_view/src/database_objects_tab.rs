@@ -5,17 +5,19 @@ use gpui::{
     ParentElement, SharedString, Styled, Window,
 };
 use gpui_component::{
-    v_flex, table::{Table, TableState}, ActiveTheme, Size,
+    table::{Table, TableState},
+    v_flex, ActiveTheme, Size,
 };
 
-use crate::results_delegate::ResultsDelegate;
+use crate::{connection_list_panel::ConnectionListPanel, results_delegate::ResultsDelegate};
 use db::types::{DbNode, ObjectView};
-use one_core::storage::DbConnectionConfig;
+use one_core::storage::{DbConnectionConfig, StoredConnection};
 use one_core::tab_container::{TabContent, TabContentType};
 
 #[derive(Clone)]
 enum LoadedData {
     ObjectView(ObjectView),
+    ConnectionList(Entity<ConnectionListPanel>),
     None,
 }
 
@@ -59,6 +61,15 @@ impl DatabaseObjectsPanel {
         self.load_data_for_node(node, config, cx);
     }
 
+    pub fn show_connection_list(&self, connections: Vec<StoredConnection>, workspace_name: Option<String>, cx: &mut App) {
+        let panel = cx.new(|_cx| ConnectionListPanel::new(connections, workspace_name));
+        
+        self.loaded_data.update(cx, |data, cx| {
+            *data = LoadedData::ConnectionList(panel);
+            cx.notify();
+        });
+    }
+
     fn load_data_for_node(&self, node: DbNode, config: DbConnectionConfig, cx: &mut App) {
         let loaded_data = self.loaded_data.clone();
         let table_state = self.table_state.clone();
@@ -77,7 +88,9 @@ impl DatabaseObjectsPanel {
             let conn = conn_arc.read().await;
 
             let result = match node.node_type {
-                db::types::DbNodeType::Connection => plugin.list_databases_view(&**conn).await.ok(),
+                db::types::DbNodeType::Connection => {
+                    plugin.list_databases_view(&**conn).await.ok()
+                },
                 db::types::DbNodeType::Database | db::types::DbNodeType::TablesFolder => {
                     plugin.list_tables_view(&**conn, &node.name).await.ok()
                 }
@@ -152,38 +165,41 @@ impl TabContent for DatabaseObjectsPanel {
         let loaded_data = self.loaded_data.read(cx).clone();
         let selected_node = self.selected_node.read(cx).clone();
 
-        div().size_full().child(match loaded_data {
-            LoadedData::ObjectView(object_view) => {
-                let title = object_view.title.clone();
+        div()
+            .size_full()
+            .child(match loaded_data {
+                LoadedData::ObjectView(object_view) => {
+                    let title = object_view.title.clone();
 
-                v_flex()
-                    .size_full()
-                    .gap_2()
-                    .child(div().p_2().text_sm().child(title))
-                    .child(
-                        div()
-                            .flex_1()
-                            .overflow_hidden()
-                            .child(Table::new(&self.table_state).stripe(true).bordered(true)),
-                    )
-                    .into_any_element()
-            }
-            LoadedData::None => {
-                let message = if selected_node.is_none() {
-                    "Select a database object to view details"
-                } else {
-                    "Loading..."
-                };
+                    v_flex()
+                        .size_full()
+                        .gap_2()
+                        .child(div().p_2().text_sm().child(title))
+                        .child(
+                            div()
+                                .flex_1()
+                                .overflow_hidden()
+                                .child(Table::new(&self.table_state).stripe(true).bordered(true)),
+                        )
+                        .into_any_element()
+                }
+                LoadedData::ConnectionList(panel) => panel.clone().into_any_element(),
+                LoadedData::None => {
+                    let message = if selected_node.is_none() {
+                        "Select a database object to view details"
+                    } else {
+                        "Loading..."
+                    };
 
-                v_flex()
-                    .size_full()
-                    .items_center()
-                    .justify_center()
-                    .child(div().text_color(cx.theme().muted_foreground).child(message))
-                    .into_any_element()
-            }
-        })
-        .into_any_element()
+                    v_flex()
+                        .size_full()
+                        .items_center()
+                        .justify_center()
+                        .child(div().text_color(cx.theme().muted_foreground).child(message))
+                        .into_any_element()
+                }
+            })
+            .into_any_element()
     }
 
     fn content_type(&self) -> TabContentType {

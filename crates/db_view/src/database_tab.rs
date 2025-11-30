@@ -1,16 +1,12 @@
-use one_core::tab_container::{TabContainer, TabContent, TabContentType, TabItem};
-use one_core::storage::StoredConnection;
 use std::any::Any;
-use gpui::prelude::FluentBuilder;
-use gpui::{div, px, AnyElement, App, AppContext, Context, Entity, FontWeight, Hsla, IntoElement, ParentElement, SharedString, Styled, Subscription, Window};
-use gpui_component::resizable::{h_resizable, resizable_panel};
-use gpui_component::{h_flex, v_flex, ActiveTheme, IconName};
-use gpui_component::button::ButtonVariants;
+
+use db::{DbNode, DbNodeType, GlobalDbState};
+use gpui::{div, px, prelude::FluentBuilder, AnyElement, App, AppContext, Context, Entity, FontWeight, Hsla, IntoElement, ParentElement, SharedString, Styled, Subscription, Window};
+use gpui_component::{button::ButtonVariants, h_flex, resizable::{h_resizable, resizable_panel}, v_flex, ActiveTheme, IconName};
+use one_core::{gpui_tokio::Tokio, storage::StoredConnection, tab_container::{TabContainer, TabContent, TabContentType, TabItem}};
 use uuid::Uuid;
-use db::{GlobalDbState, DbNode};
-use one_core::gpui_tokio::Tokio;
-use crate::database_objects_tab::DatabaseObjectsPanel;
-use crate::db_tree_view::DbTreeView;
+
+use crate::{database_objects_tab::DatabaseObjectsPanel, db_tree_view::{DbTreeView, DbTreeViewEvent}};
 
 // Event handler for database tree view events
 struct DatabaseEventHandler {
@@ -25,7 +21,6 @@ impl DatabaseEventHandler {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        use crate::db_tree_view::DbTreeViewEvent;
 
         let tab_container_clone = tab_container.clone();
         let objects_panel_clone = objects_panel.clone();
@@ -73,6 +68,53 @@ impl DatabaseEventHandler {
         objects_panel: Entity<DatabaseObjectsPanel>,
         cx: &mut App,
     ) {
+        // 当连接节点未连接时显示连接列表信息
+        if node.node_type == DbNodeType::Connection && !node.children_loaded {
+            use one_core::storage::traits::Repository;
+            use one_core::storage::{ConnectionRepository, GlobalStorageState, WorkspaceRepository};
+
+            let connection_id = node.connection_id.clone();
+            let storage_manager = cx.global::<GlobalStorageState>().storage.clone();
+
+            let result = Tokio::block_on(cx, async move {
+                let pool = storage_manager.get_pool().await.ok()?;
+
+                // 获取当前连接的信息
+                let conn_id = connection_id.parse::<i64>().ok()?;
+                let conn_repo_arc = storage_manager.get::<ConnectionRepository>().await?;
+                let conn_repo = (*conn_repo_arc).clone();
+                let current_conn = conn_repo.get(&pool, conn_id).await.ok()??;
+                let workspace_id = current_conn.workspace_id;
+
+                // 获取工作区名称
+                let workspace_name = if let Some(ws_id) = workspace_id {
+                    let workspace_repo_arc = storage_manager.get::<WorkspaceRepository>().await?;
+                    let workspace_repo = (*workspace_repo_arc).clone();
+                    workspace_repo
+                        .get(&pool, ws_id)
+                        .await
+                        .ok()
+                        .flatten()
+                        .map(|ws| ws.name)
+                } else {
+                    None
+                };
+
+                // 获取同工作区的所有连接
+                let connections = conn_repo.list_by_workspace(&pool, workspace_id).await.ok()?;
+
+                Some((connections, workspace_name))
+            });
+
+            if let Some((connections, workspace_name)) = result {
+                objects_panel.update(cx, |panel, cx| {
+                    panel.show_connection_list(connections, workspace_name, cx);
+                });
+            }
+
+            return;
+        }
+
         let connection_id = node.connection_id.clone();
 
         let config = Tokio::block_on(cx, async move {

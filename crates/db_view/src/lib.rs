@@ -1,13 +1,13 @@
-pub mod db_connection_form;
-pub mod sql_editor_view;
-pub mod sql_editor;
-pub mod db_tree_view;
-pub mod table_data_tab;
-pub mod database_objects_tab;
-pub mod data_import_view;
+pub mod connection_list_panel;
 pub mod data_export_view;
-pub mod table_designer_view;
-
+pub mod data_import_view;
+pub mod database_objects_tab;
 pub mod database_tab;
+pub mod db_connection_form;
+pub mod db_tree_view;
 pub mod results_delegate;
+pub mod sql_editor;
+pub mod sql_editor_view;
 pub mod sql_result_tab;
+pub mod table_data_tab;
+pub mod table_designer_view;

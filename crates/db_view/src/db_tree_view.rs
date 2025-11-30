@@ -586,7 +586,6 @@ impl Render for DbTreeView {
                                                         // 从 db_nodes 获取节点信息
                                                         if let Some(node) = view_clone.read(cx).db_nodes.get(&node_id_clone).cloned() {
                                                             let node_type = format!("{:?}", node.node_type);
-                                                            let has_children = node.has_children;
 
                                                             let mut menu = menu
                                                                 .label(format!("Type: {}", node_type))
@@ -664,22 +663,10 @@ impl Render for DbTreeView {
                                                                 _ => {}
                                                             }
 
-                                                            // 添加通用的刷新选项
-                                                            if has_children {
-                                                                let view_ref2 = view_clone.clone();
-                                                                let id_clone = node_id_clone.clone();
-                                                                menu = menu.item(
-                                                                    PopupMenuItem::new("Reload Children")
-                                                                        .on_click(window.listener_for(&view_ref2, move |this, _, _, cx| {
-                                                                            this.refresh_tree(id_clone.clone(), cx);
-                                                                        }))
-                                                                );
-                                                            }
-
                                                             let view_ref2 = view_clone.clone();
                                                             let id_clone = node_id_clone.clone();
                                                             menu.item(
-                                                                PopupMenuItem::new("Refresh Node")
+                                                                PopupMenuItem::new("Refresh")
                                                                     .on_click(window.listener_for(&view_ref2, move |this, _, _, cx| {
                                                                         this.refresh_tree(id_clone.clone(), cx);
                                                                     }))
