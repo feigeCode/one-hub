@@ -414,20 +414,20 @@ impl TableDesignerView {
             if_not_exists: true,
         };
 
-        match plugin.generate_create_table_sql(&request) {
-            Ok(sql) => {
-                self.preview_sql.update(cx, |preview, cx| {
-                    *preview = sql;
-                    cx.notify();
-                });
-            }
-            Err(e) => {
-                self.preview_sql.update(cx, |sql, cx| {
-                    *sql = format!("-- Error generating SQL: {}", e);
-                    cx.notify();
-                });
-            }
-        }
+        // match plugin.generate_create_table_sql(&request) {
+        //     Ok(sql) => {
+        //         self.preview_sql.update(cx, |preview, cx| {
+        //             *preview = sql;
+        //             cx.notify();
+        //         });
+        //     }
+        //     Err(e) => {
+        //         self.preview_sql.update(cx, |sql, cx| {
+        //             *sql = format!("-- Error generating SQL: {}", e);
+        //             cx.notify();
+        //         });
+        //     }
+        // }
     }
 
     fn handle_save(&mut self, _window: &mut Window, cx: &mut App) {
@@ -534,37 +534,37 @@ impl TableDesignerView {
                     if_not_exists: true,
                 };
 
-                match plugin.generate_create_table_sql(&request) {
-                    Ok(sql) => {
-                        let conn = conn_arc.read().await;
-                        match conn.execute(&sql, db::ExecOptions::default()).await {
-                            Ok(_) => {
-                                cx.update(|cx| {
-                                    status_msg.update(cx, |s, cx| {
-                                        *s = format!("✓ Table '{}' created successfully", table_name);
-                                        cx.notify();
-                                    });
-                                }).ok();
-                            }
-                            Err(e) => {
-                                cx.update(|cx| {
-                                    status_msg.update(cx, |s, cx| {
-                                        *s = format!("Error: Failed to create table: {}", e);
-                                        cx.notify();
-                                    });
-                                }).ok();
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        cx.update(|cx| {
-                            status_msg.update(cx, |s, cx| {
-                                *s = format!("Error: Failed to generate SQL: {}", e);
-                                cx.notify();
-                            });
-                        }).ok();
-                    }
-                }
+                // match plugin.generate_create_table_sql(&request) {
+                //     Ok(sql) => {
+                //         let conn = conn_arc.read().await;
+                //         match conn.execute(&sql, db::ExecOptions::default()).await {
+                //             Ok(_) => {
+                //                 cx.update(|cx| {
+                //                     status_msg.update(cx, |s, cx| {
+                //                         *s = format!("✓ Table '{}' created successfully", table_name);
+                //                         cx.notify();
+                //                     });
+                //                 }).ok();
+                //             }
+                //             Err(e) => {
+                //                 cx.update(|cx| {
+                //                     status_msg.update(cx, |s, cx| {
+                //                         *s = format!("Error: Failed to create table: {}", e);
+                //                         cx.notify();
+                //                     });
+                //                 }).ok();
+                //             }
+                //         }
+                //     }
+                //     Err(e) => {
+                //         cx.update(|cx| {
+                //             status_msg.update(cx, |s, cx| {
+                //                 *s = format!("Error: Failed to generate SQL: {}", e);
+                //                 cx.notify();
+                //             });
+                //         }).ok();
+                //     }
+                // }
             } else {
                 // Implement ALTER TABLE logic
                 cx.update(|cx| {

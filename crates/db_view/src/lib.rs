@@ -4,7 +4,6 @@ pub mod sql_editor;
 pub mod db_tree_view;
 pub mod table_data_tab;
 pub mod database_objects_tab;
-pub mod object_detail;
 pub mod data_import_view;
 pub mod data_export_view;
 pub mod table_designer_view;

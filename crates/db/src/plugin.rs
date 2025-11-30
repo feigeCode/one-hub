@@ -27,53 +27,46 @@ pub trait DatabasePlugin: Send + Sync {
 
     // === Database/Schema Level Operations ===
     async fn list_databases(&self, connection: &dyn DbConnection) -> Result<Vec<String>>;
+    
+    async fn list_databases_view(&self, connection: &dyn DbConnection) -> Result<ObjectView>;
     async fn list_databases_detailed(&self, connection: &dyn DbConnection) -> Result<Vec<DatabaseInfo>>;
-    fn generate_create_database_sql(&self, request: &CreateDatabaseRequest) -> Result<String>;
-    fn generate_drop_database_sql(&self, request: &DropDatabaseRequest) -> Result<String>;
-    fn generate_alter_database_sql(&self, request: &AlterDatabaseRequest) -> Result<String>;
 
     // === Table Operations ===
     async fn list_tables(&self, connection: &dyn DbConnection, database: &str) -> Result<Vec<TableInfo>>;
+    
+    async fn list_tables_view(&self, connection: &dyn DbConnection, database: &str) -> Result<ObjectView>;
     async fn list_columns(&self, connection: &dyn DbConnection, database: &str, table: &str) -> Result<Vec<ColumnInfo>>;
+    async fn list_columns_view(&self, connection: &dyn DbConnection, database: &str, table: &str) -> Result<ObjectView>;
     async fn list_indexes(&self, connection: &dyn DbConnection, database: &str, table: &str) -> Result<Vec<IndexInfo>>;
     
-    fn generate_create_table_sql(&self, request: &CreateTableRequest) -> Result<String>;
-    fn generate_drop_table_sql(&self, request: &DropTableRequest) -> Result<String>;
-    fn generate_rename_table_sql(&self, request: &RenameTableRequest) -> Result<String>;
-    fn generate_truncate_table_sql(&self, request: &TruncateTableRequest) -> Result<String>;
-    fn generate_add_column_sql(&self, request: &AddColumnRequest) -> Result<String>;
-    fn generate_drop_column_sql(&self, request: &DropColumnRequest) -> Result<String>;
-    fn generate_modify_column_sql(&self, request: &ModifyColumnRequest) -> Result<String>;
-
-    // === Index Operations ===
-    fn generate_create_index_sql(&self, request: &CreateIndexRequest) -> Result<String>;
-    fn generate_drop_index_sql(&self, request: &DropIndexRequest) -> Result<String>;
+    async fn list_indexes_view(&self, connection: &dyn DbConnection, database: &str, table: &str) -> Result<ObjectView>;
+    
+    
 
     // === View Operations ===
     async fn list_views(&self, connection: &dyn DbConnection, database: &str) -> Result<Vec<ViewInfo>>;
-    fn generate_create_view_sql(&self, request: &CreateViewRequest) -> Result<String>;
-    fn generate_drop_view_sql(&self, request: &DropViewRequest) -> Result<String>;
+    
+    async fn list_views_view(&self, connection: &dyn DbConnection, database: &str) -> Result<ObjectView>;
 
     // === Function Operations ===
     async fn list_functions(&self, connection: &dyn DbConnection, database: &str) -> Result<Vec<FunctionInfo>>;
-    fn generate_create_function_sql(&self, request: &CreateFunctionRequest) -> Result<String>;
-    fn generate_drop_function_sql(&self, request: &DropFunctionRequest) -> Result<String>;
+    
+    async fn list_functions_view(&self, connection: &dyn DbConnection, database: &str) -> Result<ObjectView>;
 
     // === Procedure Operations ===
     async fn list_procedures(&self, connection: &dyn DbConnection, database: &str) -> Result<Vec<FunctionInfo>>;
-    fn generate_create_procedure_sql(&self, request: &CreateProcedureRequest) -> Result<String>;
-    fn generate_drop_procedure_sql(&self, request: &DropProcedureRequest) -> Result<String>;
+    
+    async fn list_procedures_view(&self, connection: &dyn DbConnection, database: &str) -> Result<ObjectView>;
 
     // === Trigger Operations ===
     async fn list_triggers(&self, connection: &dyn DbConnection, database: &str) -> Result<Vec<TriggerInfo>>;
-    fn generate_create_trigger_sql(&self, request: &CreateTriggerRequest) -> Result<String>;
-    fn generate_drop_trigger_sql(&self, request: &DropTriggerRequest) -> Result<String>;
+    
+    async fn list_triggers_view(&self, connection: &dyn DbConnection, database: &str) -> Result<ObjectView>;
 
     // === Sequence Operations ===
     async fn list_sequences(&self, connection: &dyn DbConnection, database: &str) -> Result<Vec<SequenceInfo>>;
-    fn generate_create_sequence_sql(&self, request: &CreateSequenceRequest) -> Result<String>;
-    fn generate_drop_sequence_sql(&self, request: &DropSequenceRequest) -> Result<String>;
-    fn generate_alter_sequence_sql(&self, request: &AlterSequenceRequest) -> Result<String>;
+    
+    async fn list_sequences_view(&self, connection: &dyn DbConnection, database: &str) -> Result<ObjectView>;
 
     // === Helper Methods ===
     fn build_column_definition(&self, column: &ColumnInfo, include_name: bool) -> String {

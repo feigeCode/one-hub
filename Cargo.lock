@@ -1605,6 +1605,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "gpui",
+ "gpui-component",
  "hex",
  "once_cell",
  "one-core",

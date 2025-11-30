@@ -1,6 +1,7 @@
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt;
+use gpui_component::table::Column;
 
 /// SQL value type for parameter binding
 #[derive(Debug, Clone)]
@@ -442,3 +443,12 @@ pub struct AlterSequenceRequest {
     pub database_name: String,
     pub sequence: SequenceInfo,
 }
+
+
+#[derive(Debug, Clone)]
+pub struct ObjectView {
+    pub title: String,
+    pub columns: Vec<Column>,
+    pub rows: Vec<Vec<String>>,
+}
+

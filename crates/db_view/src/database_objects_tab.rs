@@ -1,62 +1,142 @@
-use one_core::tab_container::TabContent;
-use one_core::tab_container::TabContentType;
 use std::any::Any;
-use gpui::{div, App, Context, Entity, Focusable, FocusHandle, IntoElement, ParentElement, Styled, Window, AppContext, SharedString, AnyElement};
-use gpui_component::{v_flex, ActiveTheme, Size};
-use crate::object_detail::{ObjectDetailView, SelectedNode};
-use db::types::DbNodeType;
-use one_core::storage::DbConnectionConfig;
 
-/// Panel that displays database object details based on tree selection
-/// This replaces the old tab-based approach with a dynamic detail view
+use gpui::{
+    div, AnyElement, App, AppContext, Context, Entity, Focusable, FocusHandle, IntoElement,
+    ParentElement, SharedString, Styled, Window,
+};
+use gpui_component::{
+    v_flex, table::{Table, TableState}, ActiveTheme, Size,
+};
+
+use crate::results_delegate::ResultsDelegate;
+use db::types::{DbNode, ObjectView};
+use one_core::storage::DbConnectionConfig;
+use one_core::tab_container::{TabContent, TabContentType};
+
+#[derive(Clone)]
+enum LoadedData {
+    ObjectView(ObjectView),
+    None,
+}
+
 pub struct DatabaseObjectsPanel {
+    selected_node: Entity<Option<DbNode>>,
+    loaded_data: Entity<LoadedData>,
     connection_config: Entity<Option<DbConnectionConfig>>,
-    detail_view: Entity<ObjectDetailView>,
+    table_state: Entity<TableState<ResultsDelegate>>,
     focus_handle: FocusHandle,
-    status_msg: Entity<String>,
 }
 
 impl DatabaseObjectsPanel {
-    pub fn new(_window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let selected_node = cx.new(|_| None);
+        let loaded_data = cx.new(|_| LoadedData::None);
         let connection_config = cx.new(|_| None);
-        let detail_view = cx.new(|cx| ObjectDetailView::new(cx));
+        let delegate = ResultsDelegate::new(vec![], vec![]);
+        let table_state = cx.new(|cx| TableState::new(delegate, window, cx));
         let focus_handle = cx.focus_handle();
-        let status_msg = cx.new(|_| "Select a database object to view details".to_string());
 
         Self {
+            selected_node,
+            loaded_data,
             connection_config,
-            detail_view,
+            table_state,
             focus_handle,
-            status_msg,
         }
     }
 
-    /// Handle node selection event from the tree view
-    pub fn handle_node_selected(
-        &self,
-        node_id: String,
-        node_type: DbNodeType,
-        config: DbConnectionConfig,
-        cx: &mut App,
-    ) {
-        // Store connection config
+    pub fn handle_node_selected(&self, node: DbNode, config: DbConnectionConfig, cx: &mut App) {
+        self.selected_node.update(cx, |n, cx| {
+            *n = Some(node.clone());
+            cx.notify();
+        });
+
         self.connection_config.update(cx, |c, cx| {
             *c = Some(config.clone());
             cx.notify();
         });
 
-        // Parse node and update detail view
-        let selected_node = SelectedNode::from_node_id(&node_id, node_type);
+        self.load_data_for_node(node, config, cx);
+    }
 
-        self.detail_view.update(cx, |view, cx| {
-            view.set_selected_node(selected_node, config, cx);
-        });
+    fn load_data_for_node(&self, node: DbNode, config: DbConnectionConfig, cx: &mut App) {
+        let loaded_data = self.loaded_data.clone();
+        let table_state = self.table_state.clone();
 
-        // Update status message
-        self.status_msg.update(cx, |msg, cx| {
-            *msg = format!("Viewing details for: {}", node_id);
-            cx.notify();
-        });
+        cx.spawn(async move |cx| {
+            let global_state = cx.update(|cx| cx.global::<db::GlobalDbState>().clone()).ok()?;
+
+            let plugin = global_state.db_manager.get_plugin(&config.database_type).ok()?;
+
+            let conn_arc = global_state
+                .connection_pool
+                .get_connection(config, &global_state.db_manager)
+                .await
+                .ok()?;
+
+            let conn = conn_arc.read().await;
+
+            let result = match node.node_type {
+                db::types::DbNodeType::Connection => plugin.list_databases_view(&**conn).await.ok(),
+                db::types::DbNodeType::Database | db::types::DbNodeType::TablesFolder => {
+                    plugin.list_tables_view(&**conn, &node.name).await.ok()
+                }
+                db::types::DbNodeType::Table => {
+                    let database = node.metadata.as_ref()?.get("database")?;
+                    plugin.list_columns_view(&**conn, database, &node.name).await.ok()
+                }
+                db::types::DbNodeType::ViewsFolder => {
+                    let database = node.metadata.as_ref()?.get("database").or(Some(&node.name))?;
+                    plugin.list_views_view(&**conn, database).await.ok()
+                }
+                db::types::DbNodeType::FunctionsFolder => {
+                    let database = node.metadata.as_ref()?.get("database").or(Some(&node.name))?;
+                    plugin.list_functions_view(&**conn, database).await.ok()
+                }
+                db::types::DbNodeType::ProceduresFolder => {
+                    let database = node.metadata.as_ref()?.get("database").or(Some(&node.name))?;
+                    plugin.list_procedures_view(&**conn, database).await.ok()
+                }
+                db::types::DbNodeType::TriggersFolder => {
+                    let database = node.metadata.as_ref()?.get("database").or(Some(&node.name))?;
+                    plugin.list_triggers_view(&**conn, database).await.ok()
+                }
+                db::types::DbNodeType::SequencesFolder => {
+                    let database = node.metadata.as_ref()?.get("database").or(Some(&node.name))?;
+                    plugin.list_sequences_view(&**conn, database).await.ok()
+                }
+                _ => None,
+            };
+
+            if let Some(view) = result {
+                let columns = view.columns.clone();
+                let rows = view.rows.clone();
+
+                cx.update(|cx| {
+                    loaded_data.update(cx, |data, cx| {
+                        *data = LoadedData::ObjectView(view);
+                        cx.notify();
+                    });
+
+                    table_state.update(cx, |state, cx| {
+                        state.delegate_mut().update_data(columns, rows);
+                        state.refresh(cx);
+                    });
+                })
+                .ok();
+            } else {
+                cx.update(|cx| {
+                    loaded_data.update(cx, |data, cx| {
+                        *data = LoadedData::None;
+                        cx.notify();
+                    });
+                })
+                .ok();
+            }
+
+            Some(())
+        })
+        .detach();
     }
 }
 
@@ -69,29 +149,41 @@ impl TabContent for DatabaseObjectsPanel {
         false
     }
     fn render_content(&self, _window: &mut Window, cx: &mut App) -> AnyElement {
-        v_flex()
-            .size_full()
-            .child(
-                // Status bar
-                div()
-                    .p_2()
-                    .border_b_1()
-                    .border_color(cx.theme().border)
-                    .bg(cx.theme().muted)
+        let loaded_data = self.loaded_data.read(cx).clone();
+        let selected_node = self.selected_node.read(cx).clone();
+
+        div().size_full().child(match loaded_data {
+            LoadedData::ObjectView(object_view) => {
+                let title = object_view.title.clone();
+
+                v_flex()
+                    .size_full()
+                    .gap_2()
+                    .child(div().p_2().text_sm().child(title))
                     .child(
                         div()
-                            .text_sm()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(self.status_msg.read(cx).clone())
+                            .flex_1()
+                            .overflow_hidden()
+                            .child(Table::new(&self.table_state).stripe(true).bordered(true)),
                     )
-            )
-            .child(
-                // Detail view
-                div()
-                    .flex_1()
+                    .into_any_element()
+            }
+            LoadedData::None => {
+                let message = if selected_node.is_none() {
+                    "Select a database object to view details"
+                } else {
+                    "Loading..."
+                };
+
+                v_flex()
                     .size_full()
-                    .child(self.detail_view.clone())
-            ).into_any_element()
+                    .items_center()
+                    .justify_center()
+                    .child(div().text_color(cx.theme().muted_foreground).child(message))
+                    .into_any_element()
+            }
+        })
+        .into_any_element()
     }
 
     fn content_type(&self) -> TabContentType {
@@ -115,10 +207,11 @@ impl Focusable for DatabaseObjectsPanel {
 impl Clone for DatabaseObjectsPanel {
     fn clone(&self) -> Self {
         Self {
+            selected_node: self.selected_node.clone(),
+            loaded_data: self.loaded_data.clone(),
             connection_config: self.connection_config.clone(),
-            detail_view: self.detail_view.clone(),
+            table_state: self.table_state.clone(),
             focus_handle: self.focus_handle.clone(),
-            status_msg: self.status_msg.clone(),
         }
     }
 }

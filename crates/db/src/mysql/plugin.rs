@@ -1,11 +1,14 @@
+use std::collections::HashMap;
+
+use anyhow::Result;
+use gpui_component::table::Column;
+use one_core::storage::{DatabaseType, DbConnectionConfig};
+
 use crate::connection::{DbConnection, DbError};
 use crate::executor::{ExecOptions, ExecResult, SqlResult};
 use crate::mysql::connection::MysqlDbConnection;
 use crate::plugin::DatabasePlugin;
 use crate::types::*;
-use anyhow::Result;
-use std::collections::HashMap;
-use one_core::storage::{DatabaseType, DbConnectionConfig};
 
 /// MySQL database plugin implementation (stateless)
 pub struct MySqlPlugin;
@@ -44,6 +47,38 @@ impl DatabasePlugin for MySqlPlugin {
         } else {
             Err(anyhow::anyhow!("Unexpected result type"))
         }
+    }
+
+    async fn list_databases_view(&self, connection: &dyn DbConnection) -> Result<ObjectView> {
+        use gpui::px;
+        
+        let databases = self.list_databases_detailed(connection).await?;
+        
+        let columns = vec![
+            Column::new("name", "Name").width(px(180.0)),
+            Column::new("charset", "Charset").width(px(120.0)),
+            Column::new("collation", "Collation").width(px(180.0)),
+            Column::new("size", "Size").width(px(100.0)).text_right(),
+            Column::new("tables", "Tables").width(px(80.0)).text_right(),
+            Column::new("comment", "Comment").width(px(250.0)),
+        ];
+        
+        let rows: Vec<Vec<String>> = databases.iter().map(|db| {
+            vec![
+                db.name.clone(),
+                db.charset.as_deref().unwrap_or("-").to_string(),
+                db.collation.as_deref().unwrap_or("-").to_string(),
+                db.size.as_deref().unwrap_or("-").to_string(),
+                db.table_count.map(|n| n.to_string()).unwrap_or_else(|| "-".to_string()),
+                db.comment.as_deref().unwrap_or("").to_string(),
+            ]
+        }).collect();
+        
+        Ok(ObjectView {
+            title: format!("{} database(s)", databases.len()),
+            columns,
+            rows,
+        })
     }
 
     async fn list_databases_detailed(&self, connection: &dyn DbConnection) -> Result<Vec<DatabaseInfo>> {
@@ -86,36 +121,6 @@ impl DatabasePlugin for MySqlPlugin {
         }
     }
 
-    fn generate_create_database_sql(&self, request: &crate::types::CreateDatabaseRequest) -> Result<String> {
-        let mut sql = format!("CREATE DATABASE `{}`", request.database_name);
-        if let Some(cs) = &request.charset {
-            sql.push_str(&format!(" CHARACTER SET {}", cs));
-        }
-        if let Some(col) = &request.collation {
-            sql.push_str(&format!(" COLLATE {}", col));
-        }
-        Ok(sql)
-    }
-
-    fn generate_drop_database_sql(&self, request: &crate::types::DropDatabaseRequest) -> Result<String> {
-        let sql = if request.if_exists {
-            format!("DROP DATABASE IF EXISTS `{}`", request.database_name)
-        } else {
-            format!("DROP DATABASE `{}`", request.database_name)
-        };
-        Ok(sql)
-    }
-
-    fn generate_alter_database_sql(&self, request: &crate::types::AlterDatabaseRequest) -> Result<String> {
-        let mut sql = format!("ALTER DATABASE `{}`", request.database_name);
-        if let Some(cs) = &request.charset {
-            sql.push_str(&format!(" CHARACTER SET {}", cs));
-        }
-        if let Some(col) = &request.collation {
-            sql.push_str(&format!(" COLLATE {}", col));
-        }
-        Ok(sql)
-    }
 
     // === Table Operations ===
 
@@ -167,6 +172,36 @@ impl DatabasePlugin for MySqlPlugin {
         }
     }
 
+    async fn list_tables_view(&self, connection: &dyn DbConnection, database: &str) -> Result<ObjectView> {
+        use gpui::px;
+        
+        let tables = self.list_tables(connection, database).await?;
+        
+        let columns = vec![
+            Column::new("name", "Name").width(px(200.0)),
+            Column::new("engine", "Engine").width(px(150.0)),
+            Column::new("rows", "Rows").width(px(100.0)).text_right(),
+            Column::new("created", "Created").width(px(180.0)),
+            Column::new("comment", "Comment").width(px(300.0)),
+        ];
+        
+        let rows: Vec<Vec<String>> = tables.iter().map(|table| {
+            vec![
+                table.name.clone(),
+                table.engine.as_deref().unwrap_or("-").to_string(),
+                table.row_count.map(|n| n.to_string()).unwrap_or_else(|| "-".to_string()),
+                table.create_time.as_deref().unwrap_or("-").to_string(),
+                table.comment.as_deref().unwrap_or("").to_string(),
+            ]
+        }).collect();
+        
+        Ok(ObjectView {
+            title: format!("{} table(s)", tables.len()),
+            columns,
+            rows,
+        })
+    }
+
     async fn list_columns(&self, connection: &dyn DbConnection, database: &str, table: &str) -> Result<Vec<ColumnInfo>> {
         let sql = format!(
             "SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_KEY, COLUMN_DEFAULT, COLUMN_COMMENT \
@@ -194,6 +229,38 @@ impl DatabasePlugin for MySqlPlugin {
         } else {
             Err(anyhow::anyhow!("Unexpected result type"))
         }
+    }
+
+    async fn list_columns_view(&self, connection: &dyn DbConnection, database: &str, table: &str) -> Result<ObjectView> {
+        use gpui::px;
+        
+        let columns_data = self.list_columns(connection, database, table).await?;
+        
+        let columns = vec![
+            Column::new("name", "Name").width(px(180.0)),
+            Column::new("type", "Type").width(px(150.0)),
+            Column::new("nullable", "Nullable").width(px(80.0)),
+            Column::new("key", "Key").width(px(80.0)),
+            Column::new("default", "Default").width(px(120.0)),
+            Column::new("comment", "Comment").width(px(250.0)),
+        ];
+        
+        let rows: Vec<Vec<String>> = columns_data.iter().map(|col| {
+            vec![
+                col.name.clone(),
+                col.data_type.clone(),
+                if col.is_nullable { "YES" } else { "NO" }.to_string(),
+                if col.is_primary_key { "PRI" } else { "" }.to_string(),
+                col.default_value.as_deref().unwrap_or("").to_string(),
+                col.comment.as_deref().unwrap_or("").to_string(),
+            ]
+        }).collect();
+        
+        Ok(ObjectView {
+            title: format!("{} column(s)", columns_data.len()),
+            columns,
+            rows,
+        })
     }
 
     async fn list_indexes(&self, connection: &dyn DbConnection, database: &str, table: &str) -> Result<Vec<IndexInfo>> {
@@ -234,100 +301,33 @@ impl DatabasePlugin for MySqlPlugin {
         }
     }
 
-    fn generate_create_table_sql(&self, request: &crate::types::CreateTableRequest) -> Result<String> {
-        let column_defs: Vec<String> = request.columns.iter().map(|col| {
-            self.build_column_definition(col, true)
+    async fn list_indexes_view(&self, connection: &dyn DbConnection, database: &str, table: &str) -> Result<ObjectView> {
+        use gpui::px;
+        
+        let indexes = self.list_indexes(connection, database, table).await?;
+        
+        let columns = vec![
+            Column::new("name", "Name").width(px(180.0)),
+            Column::new("columns", "Columns").width(px(250.0)),
+            Column::new("unique", "Unique").width(px(80.0)),
+            Column::new("type", "Type").width(px(120.0)),
+        ];
+        
+        let rows: Vec<Vec<String>> = indexes.iter().map(|idx| {
+            vec![
+                idx.name.clone(),
+                idx.columns.join(", "),
+                if idx.is_unique { "YES" } else { "NO" }.to_string(),
+                idx.index_type.as_deref().unwrap_or("-").to_string(),
+            ]
         }).collect();
-
-        let if_not_exists = if request.if_not_exists { "IF NOT EXISTS " } else { "" };
-        let sql = format!("CREATE TABLE {}`{}`.`{}` ({})",
-            if_not_exists,
-            request.database_name,
-            request.table_name,
-            column_defs.join(", ")
-        );
-        Ok(sql)
+        
+        Ok(ObjectView {
+            title: format!("{} index(es)", indexes.len()),
+            columns,
+            rows,
+        })
     }
-
-    fn generate_drop_table_sql(&self, request: &crate::types::DropTableRequest) -> Result<String> {
-        let sql = if request.if_exists {
-            format!("DROP TABLE IF EXISTS `{}`.`{}`", request.database_name, request.table_name)
-        } else {
-            format!("DROP TABLE `{}`.`{}`", request.database_name, request.table_name)
-        };
-        Ok(sql)
-    }
-
-    fn generate_rename_table_sql(&self, request: &crate::types::RenameTableRequest) -> Result<String> {
-        let sql = format!("RENAME TABLE `{}`.`{}` TO `{}`.`{}`",
-            request.database_name,
-            request.old_table_name,
-            request.database_name,
-            request.new_table_name
-        );
-        Ok(sql)
-    }
-
-    fn generate_truncate_table_sql(&self, request: &crate::types::TruncateTableRequest) -> Result<String> {
-        let sql = format!("TRUNCATE TABLE `{}`.`{}`", request.database_name, request.table_name);
-        Ok(sql)
-    }
-
-    fn generate_add_column_sql(&self, request: &crate::types::AddColumnRequest) -> Result<String> {
-        let col_def = self.build_column_definition(&request.column, false);
-        let sql = format!("ALTER TABLE `{}`.`{}` ADD COLUMN `{}` {}",
-            request.database_name,
-            request.table_name,
-            request.column.name,
-            col_def
-        );
-        Ok(sql)
-    }
-
-    fn generate_drop_column_sql(&self, request: &crate::types::DropColumnRequest) -> Result<String> {
-        let sql = format!("ALTER TABLE `{}`.`{}` DROP COLUMN `{}`",
-            request.database_name,
-            request.table_name,
-            request.column_name
-        );
-        Ok(sql)
-    }
-
-    fn generate_modify_column_sql(&self, request: &crate::types::ModifyColumnRequest) -> Result<String> {
-        let col_def = self.build_column_definition(&request.column, false);
-        let sql = format!("ALTER TABLE `{}`.`{}` MODIFY COLUMN `{}` {}",
-            request.database_name,
-            request.table_name,
-            request.column.name,
-            col_def
-        );
-        Ok(sql)
-    }
-
-    // === Index Operations ===
-
-    fn generate_create_index_sql(&self, request: &crate::types::CreateIndexRequest) -> Result<String> {
-        let index_type = if request.index.is_unique { "UNIQUE" } else { "INDEX" };
-        let columns = request.index.columns.iter().map(|c| format!("`{}`", c)).collect::<Vec<_>>().join(", ");
-        let sql = format!("CREATE {} INDEX `{}` ON `{}`.`{}` ({})",
-            index_type,
-            request.index.name,
-            request.database_name,
-            request.table_name,
-            columns
-        );
-        Ok(sql)
-    }
-
-    fn generate_drop_index_sql(&self, request: &crate::types::DropIndexRequest) -> Result<String> {
-        let sql = format!("DROP INDEX `{}` ON `{}`.`{}`",
-            request.index_name,
-            request.database_name,
-            request.table_name
-        );
-        Ok(sql)
-    }
-
     // === View Operations ===
 
     async fn list_views(&self, connection: &dyn DbConnection, database: &str) -> Result<Vec<ViewInfo>> {
@@ -356,31 +356,30 @@ impl DatabasePlugin for MySqlPlugin {
         }
     }
 
-    fn generate_create_view_sql(&self, request: &crate::types::CreateViewRequest) -> Result<String> {
-        let sql = if request.or_replace {
-            format!("CREATE OR REPLACE VIEW `{}`.`{}` AS {}",
-                request.database_name,
-                request.view_name,
-                request.definition
-            )
-        } else {
-            format!("CREATE VIEW `{}`.`{}` AS {}",
-                request.database_name,
-                request.view_name,
-                request.definition
-            )
-        };
-        Ok(sql)
+    async fn list_views_view(&self, connection: &dyn DbConnection, database: &str) -> Result<ObjectView> {
+        use gpui::px;
+        
+        let views = self.list_views(connection, database).await?;
+        
+        let columns = vec![
+            Column::new("name", "Name").width(px(200.0)),
+            Column::new("definition", "Definition").width(px(400.0)),
+        ];
+        
+        let rows: Vec<Vec<String>> = views.iter().map(|view| {
+            vec![
+                view.name.clone(),
+                view.definition.as_deref().unwrap_or("").to_string(),
+            ]
+        }).collect();
+        
+        Ok(ObjectView {
+            title: format!("{} view(s)", views.len()),
+            columns,
+            rows,
+        })
     }
 
-    fn generate_drop_view_sql(&self, request: &crate::types::DropViewRequest) -> Result<String> {
-        let sql = if request.if_exists {
-            format!("DROP VIEW IF EXISTS `{}`.`{}`", request.database_name, request.view_name)
-        } else {
-            format!("DROP VIEW `{}`.`{}`", request.database_name, request.view_name)
-        };
-        Ok(sql)
-    }
 
     // === Function Operations ===
 
@@ -412,19 +411,30 @@ impl DatabasePlugin for MySqlPlugin {
         }
     }
 
-    fn generate_create_function_sql(&self, request: &crate::types::CreateFunctionRequest) -> Result<String> {
-        // For functions, the definition should contain the complete CREATE FUNCTION statement
-        Ok(request.definition.clone())
+    async fn list_functions_view(&self, connection: &dyn DbConnection, database: &str) -> Result<ObjectView> {
+        use gpui::px;
+        
+        let functions = self.list_functions(connection, database).await?;
+        
+        let columns = vec![
+            Column::new("name", "Name").width(px(200.0)),
+            Column::new("return_type", "Return Type").width(px(150.0)),
+        ];
+        
+        let rows: Vec<Vec<String>> = functions.iter().map(|func| {
+            vec![
+                func.name.clone(),
+                func.return_type.as_deref().unwrap_or("-").to_string(),
+            ]
+        }).collect();
+        
+        Ok(ObjectView {
+            title: format!("{} function(s)", functions.len()),
+            columns,
+            rows,
+        })
     }
 
-    fn generate_drop_function_sql(&self, request: &crate::types::DropFunctionRequest) -> Result<String> {
-        let sql = if request.if_exists {
-            format!("DROP FUNCTION IF EXISTS `{}`.`{}`", request.database_name, request.function_name)
-        } else {
-            format!("DROP FUNCTION `{}`.`{}`", request.database_name, request.function_name)
-        };
-        Ok(sql)
-    }
 
     // === Procedure Operations ===
 
@@ -456,18 +466,24 @@ impl DatabasePlugin for MySqlPlugin {
         }
     }
 
-    fn generate_create_procedure_sql(&self, request: &crate::types::CreateProcedureRequest) -> Result<String> {
-        // For procedures, the definition should contain the complete CREATE PROCEDURE statement
-        Ok(request.definition.clone())
-    }
-
-    fn generate_drop_procedure_sql(&self, request: &crate::types::DropProcedureRequest) -> Result<String> {
-        let sql = if request.if_exists {
-            format!("DROP PROCEDURE IF EXISTS `{}`.`{}`", request.database_name, request.procedure_name)
-        } else {
-            format!("DROP PROCEDURE `{}`.`{}`", request.database_name, request.procedure_name)
-        };
-        Ok(sql)
+    async fn list_procedures_view(&self, connection: &dyn DbConnection, database: &str) -> Result<ObjectView> {
+        use gpui::px;
+        
+        let procedures = self.list_procedures(connection, database).await?;
+        
+        let columns = vec![
+            Column::new("name", "Name").width(px(200.0)),
+        ];
+        
+        let rows: Vec<Vec<String>> = procedures.iter().map(|proc| {
+            vec![proc.name.clone()]
+        }).collect();
+        
+        Ok(ObjectView {
+            title: format!("{} procedure(s)", procedures.len()),
+            columns,
+            rows,
+        })
     }
 
     // === Trigger Operations ===
@@ -500,19 +516,34 @@ impl DatabasePlugin for MySqlPlugin {
         }
     }
 
-    fn generate_create_trigger_sql(&self, request: &crate::types::CreateTriggerRequest) -> Result<String> {
-        // For triggers, the definition should contain the complete CREATE TRIGGER statement
-        Ok(request.definition.clone())
+    async fn list_triggers_view(&self, connection: &dyn DbConnection, database: &str) -> Result<ObjectView> {
+        use gpui::px;
+        
+        let triggers = self.list_triggers(connection, database).await?;
+        
+        let columns = vec![
+            Column::new("name", "Name").width(px(180.0)),
+            Column::new("table", "Table").width(px(150.0)),
+            Column::new("event", "Event").width(px(100.0)),
+            Column::new("timing", "Timing").width(px(100.0)),
+        ];
+        
+        let rows: Vec<Vec<String>> = triggers.iter().map(|trigger| {
+            vec![
+                trigger.name.clone(),
+                trigger.table_name.clone(),
+                trigger.event.clone(),
+                trigger.timing.clone(),
+            ]
+        }).collect();
+        
+        Ok(ObjectView {
+            title: format!("{} trigger(s)", triggers.len()),
+            columns,
+            rows,
+        })
     }
 
-    fn generate_drop_trigger_sql(&self, request: &crate::types::DropTriggerRequest) -> Result<String> {
-        let sql = if request.if_exists {
-            format!("DROP TRIGGER IF EXISTS `{}`.`{}`", request.database_name, request.trigger_name)
-        } else {
-            format!("DROP TRIGGER `{}`.`{}`", request.database_name, request.trigger_name)
-        };
-        Ok(sql)
-    }
 
     // === Sequence Operations ===
     // MySQL doesn't support sequences natively (until MySQL 8.0 which has AUTO_INCREMENT only)
@@ -522,16 +553,18 @@ impl DatabasePlugin for MySqlPlugin {
         Ok(Vec::new())
     }
 
-    fn generate_create_sequence_sql(&self, _request: &crate::types::CreateSequenceRequest) -> Result<String> {
-        Err(anyhow::anyhow!("MySQL does not support sequences"))
-    }
-
-    fn generate_drop_sequence_sql(&self, _request: &crate::types::DropSequenceRequest) -> Result<String> {
-        Err(anyhow::anyhow!("MySQL does not support sequences"))
-    }
-
-    fn generate_alter_sequence_sql(&self, _request: &crate::types::AlterSequenceRequest) -> Result<String> {
-        Err(anyhow::anyhow!("MySQL does not support sequences"))
+    async fn list_sequences_view(&self, _connection: &dyn DbConnection, _database: &str) -> Result<ObjectView> {
+        use gpui::px;
+        
+        let columns = vec![
+            Column::new("name", "Name").width(px(200.0)),
+        ];
+        
+        Ok(ObjectView {
+            title: "0 sequence(s)".to_string(),
+            columns,
+            rows: vec![],
+        })
     }
 
     // === Query Execution ===

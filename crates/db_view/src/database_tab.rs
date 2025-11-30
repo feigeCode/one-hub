@@ -73,8 +73,6 @@ impl DatabaseEventHandler {
         objects_panel: Entity<DatabaseObjectsPanel>,
         cx: &mut App,
     ) {
-        let node_id = node.id.clone();
-        let node_type = node.node_type.clone();
         let connection_id = node.connection_id.clone();
 
         let config = Tokio::block_on(cx, async move {
@@ -83,7 +81,7 @@ impl DatabaseEventHandler {
 
         if let Some(config) = config {
             objects_panel.update(cx, |panel, cx| {
-                panel.handle_node_selected(node_id, node_type, config, cx);
+                panel.handle_node_selected(node, config, cx);
             });
         }
     }

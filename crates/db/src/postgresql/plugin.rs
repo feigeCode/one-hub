@@ -1,11 +1,15 @@
-use anyhow::Result;
 use std::collections::HashMap;
+
+use anyhow::Result;
+use async_trait::async_trait;
+use gpui_component::table::Column;
 use one_core::storage::{DatabaseType, DbConnectionConfig};
+
 use crate::connection::{DbConnection, DbError};
-use crate::types::*;
+use crate::executor::{ExecOptions, ExecResult, SqlResult};
 use crate::plugin::DatabasePlugin;
 use crate::postgresql::connection::PostgresDbConnection;
-use crate::executor::{ExecOptions, SqlResult, ExecResult};
+use crate::types::*;
 
 /// PostgreSQL database plugin implementation (stateless)
 pub struct PostgresPlugin;
@@ -16,7 +20,7 @@ impl PostgresPlugin {
     }
 }
 
-#[async_trait::async_trait]
+#[async_trait]
 impl DatabasePlugin for PostgresPlugin {
     fn name(&self) -> DatabaseType {
         DatabaseType::PostgreSQL
@@ -43,6 +47,38 @@ impl DatabasePlugin for PostgresPlugin {
         } else {
             Err(anyhow::anyhow!("Unexpected result type"))
         }
+    }
+
+    async fn list_databases_view(&self, connection: &dyn DbConnection) -> Result<ObjectView> {
+        use gpui::px;
+        
+        let databases = self.list_databases_detailed(connection).await?;
+        
+        let columns = vec![
+            Column::new("name", "Name").width(px(180.0)),
+            Column::new("charset", "Encoding").width(px(120.0)),
+            Column::new("collation", "Collation").width(px(180.0)),
+            Column::new("size", "Size").width(px(100.0)).text_right(),
+            Column::new("tables", "Tables").width(px(80.0)).text_right(),
+            Column::new("comment", "Comment").width(px(250.0)),
+        ];
+        
+        let rows: Vec<Vec<String>> = databases.iter().map(|db| {
+            vec![
+                db.name.clone(),
+                db.charset.as_deref().unwrap_or("-").to_string(),
+                db.collation.as_deref().unwrap_or("-").to_string(),
+                db.size.as_deref().unwrap_or("-").to_string(),
+                db.table_count.map(|n| n.to_string()).unwrap_or_else(|| "-".to_string()),
+                db.comment.as_deref().unwrap_or("").to_string(),
+            ]
+        }).collect();
+        
+        Ok(ObjectView {
+            title: format!("{} database(s)", databases.len()),
+            columns,
+            rows,
+        })
     }
 
     async fn list_databases_detailed(&self, connection: &dyn DbConnection) -> Result<Vec<DatabaseInfo>> {
@@ -86,31 +122,7 @@ impl DatabasePlugin for PostgresPlugin {
             Err(anyhow::anyhow!("Unexpected result type"))
         }
     }
-
-    fn generate_create_database_sql(&self, request: &crate::types::CreateDatabaseRequest) -> Result<String> {
-        let mut sql = format!("CREATE DATABASE \"{}\"", request.database_name);
-        if let Some(cs) = &request.charset {
-            sql.push_str(&format!(" ENCODING '{}'", cs));
-        }
-        if let Some(col) = &request.collation {
-            sql.push_str(&format!(" LC_COLLATE '{}'", col));
-        }
-        Ok(sql)
-    }
-
-    fn generate_drop_database_sql(&self, request: &crate::types::DropDatabaseRequest) -> Result<String> {
-        let sql = if request.if_exists {
-            format!("DROP DATABASE IF EXISTS \"{}\"", request.database_name)
-        } else {
-            format!("DROP DATABASE \"{}\"", request.database_name)
-        };
-        Ok(sql)
-    }
-
-    fn generate_alter_database_sql(&self, _request: &crate::types::AlterDatabaseRequest) -> Result<String> {
-        // PostgreSQL doesn't support altering database encoding/collation after creation
-        Err(anyhow::anyhow!("PostgreSQL does not support altering database encoding/collation"))
-    }
+    
 
     // === Table Operations ===
 
@@ -151,6 +163,32 @@ impl DatabasePlugin for PostgresPlugin {
         }
     }
 
+    async fn list_tables_view(&self, connection: &dyn DbConnection, database: &str) -> Result<ObjectView> {
+        use gpui::px;
+        
+        let tables = self.list_tables(connection, database).await?;
+        
+        let columns = vec![
+            Column::new("name", "Name").width(px(200.0)),
+            Column::new("rows", "Rows").width(px(100.0)).text_right(),
+            Column::new("comment", "Comment").width(px(400.0)),
+        ];
+        
+        let rows: Vec<Vec<String>> = tables.iter().map(|table| {
+            vec![
+                table.name.clone(),
+                table.row_count.map(|n| n.to_string()).unwrap_or_else(|| "-".to_string()),
+                table.comment.as_deref().unwrap_or("").to_string(),
+            ]
+        }).collect();
+        
+        Ok(ObjectView {
+            title: format!("{} table(s)", tables.len()),
+            columns,
+            rows,
+        })
+    }
+
     async fn list_columns(&self, connection: &dyn DbConnection, _database: &str, table: &str) -> Result<Vec<ColumnInfo>> {
         let sql = format!(
             "SELECT column_name, data_type, is_nullable, column_default, \
@@ -183,6 +221,36 @@ impl DatabasePlugin for PostgresPlugin {
         } else {
             Err(anyhow::anyhow!("Unexpected result type"))
         }
+    }
+
+    async fn list_columns_view(&self, connection: &dyn DbConnection, database: &str, table: &str) -> Result<ObjectView> {
+        use gpui::px;
+        
+        let columns_data = self.list_columns(connection, database, table).await?;
+        
+        let columns = vec![
+            Column::new("name", "Name").width(px(180.0)),
+            Column::new("type", "Type").width(px(150.0)),
+            Column::new("nullable", "Nullable").width(px(80.0)),
+            Column::new("key", "Key").width(px(80.0)),
+            Column::new("default", "Default").width(px(200.0)),
+        ];
+        
+        let rows: Vec<Vec<String>> = columns_data.iter().map(|col| {
+            vec![
+                col.name.clone(),
+                col.data_type.clone(),
+                if col.is_nullable { "YES" } else { "NO" }.to_string(),
+                if col.is_primary_key { "PRI" } else { "" }.to_string(),
+                col.default_value.as_deref().unwrap_or("").to_string(),
+            ]
+        }).collect();
+        
+        Ok(ObjectView {
+            title: format!("{} column(s)", columns_data.len()),
+            columns,
+            rows,
+        })
     }
 
     async fn list_indexes(&self, connection: &dyn DbConnection, _database: &str, table: &str) -> Result<Vec<IndexInfo>> {
@@ -227,111 +295,34 @@ impl DatabasePlugin for PostgresPlugin {
         }
     }
 
-    fn generate_create_table_sql(&self, request: &crate::types::CreateTableRequest) -> Result<String> {
-        let column_defs: Vec<String> = request.columns.iter().map(|col| {
-            self.build_column_definition(col, true)
+    async fn list_indexes_view(&self, connection: &dyn DbConnection, database: &str, table: &str) -> Result<ObjectView> {
+        use gpui::px;
+        
+        let indexes = self.list_indexes(connection, database, table).await?;
+        
+        let columns = vec![
+            Column::new("name", "Name").width(px(180.0)),
+            Column::new("columns", "Columns").width(px(250.0)),
+            Column::new("unique", "Unique").width(px(80.0)),
+            Column::new("type", "Type").width(px(120.0)),
+        ];
+        
+        let rows: Vec<Vec<String>> = indexes.iter().map(|idx| {
+            vec![
+                idx.name.clone(),
+                idx.columns.join(", "),
+                if idx.is_unique { "YES" } else { "NO" }.to_string(),
+                idx.index_type.as_deref().unwrap_or("-").to_string(),
+            ]
         }).collect();
-
-        let if_not_exists = if request.if_not_exists { "IF NOT EXISTS " } else { "" };
-        let sql = format!("CREATE TABLE {}\"{}\" ({})",
-            if_not_exists,
-            request.table_name,
-            column_defs.join(", ")
-        );
-        Ok(sql)
+        
+        Ok(ObjectView {
+            title: format!("{} index(es)", indexes.len()),
+            columns,
+            rows,
+        })
     }
 
-    fn generate_drop_table_sql(&self, request: &crate::types::DropTableRequest) -> Result<String> {
-        let sql = if request.if_exists {
-            format!("DROP TABLE IF EXISTS \"{}\"", request.table_name)
-        } else {
-            format!("DROP TABLE \"{}\"", request.table_name)
-        };
-        Ok(sql)
-    }
-
-    fn generate_rename_table_sql(&self, request: &crate::types::RenameTableRequest) -> Result<String> {
-        let sql = format!("ALTER TABLE \"{}\" RENAME TO \"{}\"",
-            request.old_table_name,
-            request.new_table_name
-        );
-        Ok(sql)
-    }
-
-    fn generate_truncate_table_sql(&self, request: &crate::types::TruncateTableRequest) -> Result<String> {
-        let sql = format!("TRUNCATE TABLE \"{}\"", request.table_name);
-        Ok(sql)
-    }
-
-    fn generate_add_column_sql(&self, request: &crate::types::AddColumnRequest) -> Result<String> {
-        let col_def = self.build_column_definition(&request.column, false);
-        let sql = format!("ALTER TABLE \"{}\" ADD COLUMN \"{}\" {}",
-            request.table_name,
-            request.column.name,
-            col_def
-        );
-        Ok(sql)
-    }
-
-    fn generate_drop_column_sql(&self, request: &crate::types::DropColumnRequest) -> Result<String> {
-        let sql = format!("ALTER TABLE \"{}\" DROP COLUMN \"{}\"",
-            request.table_name,
-            request.column_name
-        );
-        Ok(sql)
-    }
-
-    fn generate_modify_column_sql(&self, request: &crate::types::ModifyColumnRequest) -> Result<String> {
-        // PostgreSQL requires separate ALTER statements for type and nullability
-        let mut sqls = Vec::new();
-
-        sqls.push(format!("ALTER TABLE \"{}\" ALTER COLUMN \"{}\" TYPE {}",
-            request.table_name,
-            request.column.name,
-            request.column.data_type
-        ));
-
-        if request.column.is_nullable {
-            sqls.push(format!("ALTER TABLE \"{}\" ALTER COLUMN \"{}\" DROP NOT NULL",
-                request.table_name,
-                request.column.name
-            ));
-        } else {
-            sqls.push(format!("ALTER TABLE \"{}\" ALTER COLUMN \"{}\" SET NOT NULL",
-                request.table_name,
-                request.column.name
-            ));
-        }
-
-        if let Some(default) = &request.column.default_value {
-            sqls.push(format!("ALTER TABLE \"{}\" ALTER COLUMN \"{}\" SET DEFAULT {}",
-                request.table_name,
-                request.column.name,
-                default
-            ));
-        }
-
-        Ok(sqls.join(";\n"))
-    }
-
-    // === Index Operations ===
-
-    fn generate_create_index_sql(&self, request: &crate::types::CreateIndexRequest) -> Result<String> {
-        let index_type = if request.index.is_unique { "UNIQUE " } else { "" };
-        let columns = request.index.columns.iter().map(|c| format!("\"{}\"", c)).collect::<Vec<_>>().join(", ");
-        let sql = format!("CREATE {}INDEX \"{}\" ON \"{}\" ({})",
-            index_type,
-            request.index.name,
-            request.table_name,
-            columns
-        );
-        Ok(sql)
-    }
-
-    fn generate_drop_index_sql(&self, request: &crate::types::DropIndexRequest) -> Result<String> {
-        let sql = format!("DROP INDEX \"{}\"", request.index_name);
-        Ok(sql)
-    }
 
     // === View Operations ===
 
@@ -355,28 +346,28 @@ impl DatabasePlugin for PostgresPlugin {
         }
     }
 
-    fn generate_create_view_sql(&self, request: &crate::types::CreateViewRequest) -> Result<String> {
-        let sql = if request.or_replace {
-            format!("CREATE OR REPLACE VIEW \"{}\" AS {}",
-                request.view_name,
-                request.definition
-            )
-        } else {
-            format!("CREATE VIEW \"{}\" AS {}",
-                request.view_name,
-                request.definition
-            )
-        };
-        Ok(sql)
-    }
-
-    fn generate_drop_view_sql(&self, request: &crate::types::DropViewRequest) -> Result<String> {
-        let sql = if request.if_exists {
-            format!("DROP VIEW IF EXISTS \"{}\"", request.view_name)
-        } else {
-            format!("DROP VIEW \"{}\"", request.view_name)
-        };
-        Ok(sql)
+    async fn list_views_view(&self, connection: &dyn DbConnection, database: &str) -> Result<ObjectView> {
+        use gpui::px;
+        
+        let views = self.list_views(connection, database).await?;
+        
+        let columns = vec![
+            Column::new("name", "Name").width(px(200.0)),
+            Column::new("definition", "Definition").width(px(400.0)),
+        ];
+        
+        let rows: Vec<Vec<String>> = views.iter().map(|view| {
+            vec![
+                view.name.clone(),
+                view.definition.as_deref().unwrap_or("").to_string(),
+            ]
+        }).collect();
+        
+        Ok(ObjectView {
+            title: format!("{} view(s)", views.len()),
+            columns,
+            rows,
+        })
     }
 
     // === Function Operations ===
@@ -403,19 +394,30 @@ impl DatabasePlugin for PostgresPlugin {
         }
     }
 
-    fn generate_create_function_sql(&self, request: &crate::types::CreateFunctionRequest) -> Result<String> {
-        // For functions, the definition should contain the complete CREATE FUNCTION statement
-        Ok(request.definition.clone())
+    async fn list_functions_view(&self, connection: &dyn DbConnection, database: &str) -> Result<ObjectView> {
+        use gpui::px;
+        
+        let functions = self.list_functions(connection, database).await?;
+        
+        let columns = vec![
+            Column::new("name", "Name").width(px(200.0)),
+            Column::new("return_type", "Return Type").width(px(150.0)),
+        ];
+        
+        let rows: Vec<Vec<String>> = functions.iter().map(|func| {
+            vec![
+                func.name.clone(),
+                func.return_type.as_deref().unwrap_or("-").to_string(),
+            ]
+        }).collect();
+        
+        Ok(ObjectView {
+            title: format!("{} function(s)", functions.len()),
+            columns,
+            rows,
+        })
     }
 
-    fn generate_drop_function_sql(&self, request: &crate::types::DropFunctionRequest) -> Result<String> {
-        let sql = if request.if_exists {
-            format!("DROP FUNCTION IF EXISTS \"{}\"", request.function_name)
-        } else {
-            format!("DROP FUNCTION \"{}\"", request.function_name)
-        };
-        Ok(sql)
-    }
 
     // === Procedure Operations ===
 
@@ -441,19 +443,26 @@ impl DatabasePlugin for PostgresPlugin {
         }
     }
 
-    fn generate_create_procedure_sql(&self, request: &crate::types::CreateProcedureRequest) -> Result<String> {
-        // For procedures, the definition should contain the complete CREATE PROCEDURE statement
-        Ok(request.definition.clone())
+    async fn list_procedures_view(&self, connection: &dyn DbConnection, database: &str) -> Result<ObjectView> {
+        use gpui::px;
+        
+        let procedures = self.list_procedures(connection, database).await?;
+        
+        let columns = vec![
+            Column::new("name", "Name").width(px(200.0)),
+        ];
+        
+        let rows: Vec<Vec<String>> = procedures.iter().map(|proc| {
+            vec![proc.name.clone()]
+        }).collect();
+        
+        Ok(ObjectView {
+            title: format!("{} procedure(s)", procedures.len()),
+            columns,
+            rows,
+        })
     }
 
-    fn generate_drop_procedure_sql(&self, request: &crate::types::DropProcedureRequest) -> Result<String> {
-        let sql = if request.if_exists {
-            format!("DROP PROCEDURE IF EXISTS \"{}\"", request.procedure_name)
-        } else {
-            format!("DROP PROCEDURE \"{}\"", request.procedure_name)
-        };
-        Ok(sql)
-    }
 
     // === Trigger Operations ===
 
@@ -482,16 +491,34 @@ impl DatabasePlugin for PostgresPlugin {
         }
     }
 
-    fn generate_create_trigger_sql(&self, request: &crate::types::CreateTriggerRequest) -> Result<String> {
-        // For triggers, the definition should contain the complete CREATE TRIGGER statement
-        Ok(request.definition.clone())
+    async fn list_triggers_view(&self, connection: &dyn DbConnection, database: &str) -> Result<ObjectView> {
+        use gpui::px;
+        
+        let triggers = self.list_triggers(connection, database).await?;
+        
+        let columns = vec![
+            Column::new("name", "Name").width(px(180.0)),
+            Column::new("table", "Table").width(px(150.0)),
+            Column::new("event", "Event").width(px(100.0)),
+            Column::new("timing", "Timing").width(px(100.0)),
+        ];
+        
+        let rows: Vec<Vec<String>> = triggers.iter().map(|trigger| {
+            vec![
+                trigger.name.clone(),
+                trigger.table_name.clone(),
+                trigger.event.clone(),
+                trigger.timing.clone(),
+            ]
+        }).collect();
+        
+        Ok(ObjectView {
+            title: format!("{} trigger(s)", triggers.len()),
+            columns,
+            rows,
+        })
     }
 
-    fn generate_drop_trigger_sql(&self, _request: &crate::types::DropTriggerRequest) -> Result<String> {
-        // PostgreSQL requires table name for DROP TRIGGER
-        // Since we don't have it in the request, we'll return an error
-        Err(anyhow::anyhow!("PostgreSQL requires table name for DROP TRIGGER. Please use raw SQL with format: DROP TRIGGER trigger_name ON table_name"))
-    }
 
     // === Sequence Operations ===
 
@@ -520,50 +547,34 @@ impl DatabasePlugin for PostgresPlugin {
         }
     }
 
-    fn generate_create_sequence_sql(&self, request: &crate::types::CreateSequenceRequest) -> Result<String> {
-        let mut sql = format!("CREATE SEQUENCE \"{}\"", request.sequence.name);
-        if let Some(start) = request.sequence.start_value {
-            sql.push_str(&format!(" START {}", start));
-        }
-        if let Some(inc) = request.sequence.increment {
-            sql.push_str(&format!(" INCREMENT {}", inc));
-        }
-        if let Some(min) = request.sequence.min_value {
-            sql.push_str(&format!(" MINVALUE {}", min));
-        }
-        if let Some(max) = request.sequence.max_value {
-            sql.push_str(&format!(" MAXVALUE {}", max));
-        }
-        Ok(sql)
-    }
-
-    fn generate_drop_sequence_sql(&self, request: &crate::types::DropSequenceRequest) -> Result<String> {
-        let sql = if request.if_exists {
-            format!("DROP SEQUENCE IF EXISTS \"{}\"", request.sequence_name)
-        } else {
-            format!("DROP SEQUENCE \"{}\"", request.sequence_name)
-        };
-        Ok(sql)
-    }
-
-    fn generate_alter_sequence_sql(&self, request: &crate::types::AlterSequenceRequest) -> Result<String> {
-        let mut sqls = Vec::new();
-
-        if let Some(inc) = request.sequence.increment {
-            sqls.push(format!("ALTER SEQUENCE \"{}\" INCREMENT {}", request.sequence.name, inc));
-        }
-        if let Some(min) = request.sequence.min_value {
-            sqls.push(format!("ALTER SEQUENCE \"{}\" MINVALUE {}", request.sequence.name, min));
-        }
-        if let Some(max) = request.sequence.max_value {
-            sqls.push(format!("ALTER SEQUENCE \"{}\" MAXVALUE {}", request.sequence.name, max));
-        }
-
-        if sqls.is_empty() {
-            return Err(anyhow::anyhow!("No sequence modifications specified"));
-        }
-
-        Ok(sqls.join(";\n"))
+    async fn list_sequences_view(&self, connection: &dyn DbConnection, database: &str) -> Result<ObjectView> {
+        use gpui::px;
+        
+        let sequences = self.list_sequences(connection, database).await?;
+        
+        let columns = vec![
+            Column::new("name", "Name").width(px(180.0)),
+            Column::new("start", "Start").width(px(100.0)).text_right(),
+            Column::new("increment", "Increment").width(px(100.0)).text_right(),
+            Column::new("min", "Min").width(px(120.0)).text_right(),
+            Column::new("max", "Max").width(px(120.0)).text_right(),
+        ];
+        
+        let rows: Vec<Vec<String>> = sequences.iter().map(|seq| {
+            vec![
+                seq.name.clone(),
+                seq.start_value.map(|n| n.to_string()).unwrap_or_else(|| "-".to_string()),
+                seq.increment.map(|n| n.to_string()).unwrap_or_else(|| "-".to_string()),
+                seq.min_value.map(|n| n.to_string()).unwrap_or_else(|| "-".to_string()),
+                seq.max_value.map(|n| n.to_string()).unwrap_or_else(|| "-".to_string()),
+            ]
+        }).collect();
+        
+        Ok(ObjectView {
+            title: format!("{} sequence(s)", sequences.len()),
+            columns,
+            rows,
+        })
     }
 
     // === Query Execution ===
