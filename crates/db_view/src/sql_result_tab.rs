@@ -129,7 +129,7 @@ impl SqlResultTabContainer {
 }
 
 impl Render for SqlResultTabContainer {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tabs = self.result_tabs.read().unwrap();
         let active_idx = *self.active_result_tab.read().unwrap();
 

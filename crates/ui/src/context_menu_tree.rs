@@ -269,37 +269,6 @@ impl ContextMenuTree {
         }
     }
 
-    fn on_entry_click(state: &Entity<ContextMenuTreeState>, ix: usize, _: &mut Window, cx: &mut App) {
-        state.update(cx, |state, cx| {
-            // 设置选中索引
-            state.set_selected_index(Some(ix), cx);
-
-            // 切换展开状态
-            if let Some(entry) = state.entries.get(ix) {
-                if entry.item.is_folder() {
-                    let item_id = entry.item.id.clone();
-                    let current_expanded = entry.item.is_expanded();
-
-                    // 重建所有树项，切换目标项的展开状态
-                    let new_items = state.entries
-                        .iter()
-                        .filter(|e| e.depth == 0)
-                        .map(|e| {
-                            Self::toggle_item_expanded(&e.item, &item_id, current_expanded)
-                        })
-                        .collect::<Vec<_>>();
-
-                    state.entries.clear();
-                    for item in new_items.into_iter() {
-                        state.add_entry(item, 0);
-                    }
-
-                    cx.notify();
-                }
-            }
-        })
-    }
-
     // 递归切换树项的展开状态
     fn toggle_item_expanded(item: &TreeItem, target_id: &str, current_expanded: bool) -> TreeItem {
         let mut new_item = TreeItem::new(item.id.clone(), item.label.clone())

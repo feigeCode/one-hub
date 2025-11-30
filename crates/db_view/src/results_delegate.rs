@@ -1,4 +1,4 @@
-use gpui::{div, App, IntoElement, Window};
+use gpui::{ App, IntoElement, Window};
 use gpui_component::table::{Column, TableDelegate};
 
 pub struct ResultsDelegate {

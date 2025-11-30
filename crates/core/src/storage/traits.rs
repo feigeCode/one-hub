@@ -1,4 +1,3 @@
-use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::Result;
 use async_trait::async_trait;
 use gpui::SharedString;

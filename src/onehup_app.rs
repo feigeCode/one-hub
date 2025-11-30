@@ -1,6 +1,6 @@
 use crate::home::HomeTabContent;
 use core::tab_container::{TabContainer, TabItem};
-use gpui::{div, px, App, AppContext, Context, Entity, Hsla, IntoElement, KeyBinding, ParentElement, Render, Styled, Window};
+use gpui::{div, px, App, AppContext, Context, Entity, IntoElement, KeyBinding, ParentElement, Render, Styled, Window};
 use gpui_component::dock::{ClosePanel, ToggleZoom};
 use gpui_component::{ActiveTheme, Root};
 use tracing_subscriber::layer::SubscriberExt;

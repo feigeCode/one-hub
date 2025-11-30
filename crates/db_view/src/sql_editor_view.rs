@@ -1,7 +1,7 @@
 use crate::sql_editor::SqlEditor;
 use crate::sql_result_tab::SqlResultTabContainer;
 use core::tab_container::{TabContent, TabContentType};
-use db::{DbConnectionConfig, ExecOptions, GlobalDbState};
+use db::{ExecOptions, GlobalDbState};
 use gpui::{div, px, AnyElement, App, AppContext, ClickEvent, Entity, FocusHandle, Focusable, IntoElement, ParentElement, SharedString, Styled, Window};
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::resizable::{resizable_panel, v_resizable};
@@ -389,7 +389,7 @@ impl TabContent for SqlEditorTabContent {
         self
     }
 
-    fn render_content(&self, window: &mut Window, cx: &mut App) -> AnyElement {
+    fn render_content(&self, _window: &mut Window, cx: &mut App) -> AnyElement {
         let status_msg_render = self.status_msg.clone();
         let editor = self.editor.clone();
         let database_select = self.database_select.clone();
