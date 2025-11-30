@@ -1,15 +1,16 @@
-use core::tab_container::TabContent;
-use core::tab_container::TabContentType;
+use one_core::tab_container::TabContent;
+use one_core::tab_container::TabContentType;
 use std::any::Any;
 use gpui::{div, App, Context, Entity, Focusable, FocusHandle, IntoElement, ParentElement, Styled, Window, AppContext, SharedString, AnyElement};
 use gpui_component::{v_flex, ActiveTheme, Size};
 use crate::object_detail::{ObjectDetailView, SelectedNode};
 use db::types::DbNodeType;
+use one_core::storage::DbConnectionConfig;
 
 /// Panel that displays database object details based on tree selection
 /// This replaces the old tab-based approach with a dynamic detail view
 pub struct DatabaseObjectsPanel {
-    connection_config: Entity<Option<db::DbConnectionConfig>>,
+    connection_config: Entity<Option<DbConnectionConfig>>,
     detail_view: Entity<ObjectDetailView>,
     focus_handle: FocusHandle,
     status_msg: Entity<String>,
@@ -35,7 +36,7 @@ impl DatabaseObjectsPanel {
         &self,
         node_id: String,
         node_type: DbNodeType,
-        config: db::DbConnectionConfig,
+        config: DbConnectionConfig,
         cx: &mut App,
     ) {
         // Store connection config

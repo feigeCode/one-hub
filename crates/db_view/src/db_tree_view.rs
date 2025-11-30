@@ -1,4 +1,4 @@
-use core::storage::StoredConnection;
+use one_core::storage::StoredConnection;
 use std::collections::{HashMap, HashSet};
 use gpui::{App, AppContext, Context, Entity, IntoElement, InteractiveElement, ParentElement, Render, Styled, Window, div, StatefulInteractiveElement, EventEmitter, SharedString, Focusable, FocusHandle};
 use tracing::log::trace;

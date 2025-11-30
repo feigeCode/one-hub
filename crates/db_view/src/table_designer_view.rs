@@ -1,9 +1,9 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use core::gpui_tokio::Tokio;
-use core::tab_container::{TabContent, TabContentType};
-use db::{ColumnInfo, DataTypeCategory, DataTypeInfo, DatabaseType, GlobalDbState};
+use one_core::gpui_tokio::Tokio;
+use one_core::tab_container::{TabContent, TabContentType};
+use db::{ColumnInfo, DataTypeCategory, DataTypeInfo, GlobalDbState};
 use gpui::{div, px, AnyElement, App, AppContext, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement, ParentElement, Render, SharedString, Styled, Window};
 use gpui_component::{
     button::{Button, ButtonVariants as _, DropdownButton},
@@ -13,6 +13,7 @@ use gpui_component::{
     switch::Switch,
     v_flex, ActiveTheme, IconName, Sizable, StyledExt as _,
 };
+use one_core::storage::DatabaseType;
 
 /// 字段行
 #[derive(Clone)]

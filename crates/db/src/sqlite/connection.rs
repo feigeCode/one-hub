@@ -4,14 +4,14 @@ use std::time::Instant;
 use async_trait::async_trait;
 use sqlx::sqlite::{SqlitePoolOptions, SqliteRow};
 use sqlx::{Column, Row, SqlitePool};
-
+use one_core::storage::DbConnectionConfig;
 use crate::connection::{DbConnection, DbError};
 use crate::executor::{
     ExecOptions, ExecResult, QueryResult, SqlErrorInfo, SqlResult, SqlScriptSplitter,
     SqlStatementClassifier,
 };
 use crate::runtime::TOKIO_HANDLE;
-use crate::types::{DbConnectionConfig, SqlValue};
+use crate::types::{SqlValue};
 
 pub struct SqliteDbConnection {
     config: Option<DbConnectionConfig>,

@@ -1,5 +1,5 @@
 use crate::home::HomeTabContent;
-use core::tab_container::{TabContainer, TabItem};
+use one_core::tab_container::{TabContainer, TabItem};
 use gpui::{div, px, App, AppContext, Context, Entity, IntoElement, KeyBinding, ParentElement, Render, Styled, Window};
 use gpui_component::dock::{ClosePanel, ToggleZoom};
 use gpui_component::{ActiveTheme, Root};
@@ -17,7 +17,7 @@ pub fn init(cx: &mut App) {
         .init();
 
     gpui_component::init(cx);
-    core::init(cx);
+    one_core::init(cx);
     cx.bind_keys(vec![
         KeyBinding::new("shift-escape", ToggleZoom, None),
         KeyBinding::new("ctrl-w", ClosePanel, None),

@@ -12,7 +12,7 @@ use gpui_component::{
 };
 
 use crate::results_delegate::ResultsDelegate;
-use core::tab_container::{TabContent, TabContentType};
+use one_core::tab_container::{TabContent, TabContentType};
 use db::GlobalDbState;
 // ============================================================================
 // Table Data Tab Content - Display table rows

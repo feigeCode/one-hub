@@ -1,5 +1,4 @@
 use crate::connection::{DbConnection, DbError};
-use crate::types::{DbConnectionConfig, SqlValue};
 use crate::executor::{ExecOptions, ExecResult, QueryResult, SqlErrorInfo, SqlResult, SqlScriptSplitter, SqlStatementClassifier};
 use crate::runtime::TOKIO_HANDLE;
 use sqlx::{Column, PgPool, Row, ValueRef};
@@ -7,6 +6,8 @@ use std::time::Instant;
 use async_trait::async_trait;
 use sqlx::postgres::{PgArguments, PgPoolOptions, PgRow};
 use std::sync::RwLock;
+use one_core::storage::DbConnectionConfig;
+use crate::{ SqlValue};
 
 pub struct PostgresDbConnection {
     config: Option<DbConnectionConfig>,

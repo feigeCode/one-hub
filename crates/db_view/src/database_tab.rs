@@ -1,5 +1,5 @@
-use core::tab_container::{TabContainer, TabContent, TabContentType, TabItem};
-use core::storage::StoredConnection;
+use one_core::tab_container::{TabContainer, TabContent, TabContentType, TabItem};
+use one_core::storage::StoredConnection;
 use std::any::Any;
 use gpui::prelude::FluentBuilder;
 use gpui::{div, px, AnyElement, App, AppContext, Context, Entity, FontWeight, Hsla, IntoElement, ParentElement, SharedString, Styled, Subscription, Window};
@@ -8,6 +8,7 @@ use gpui_component::{h_flex, v_flex, ActiveTheme, IconName};
 use gpui_component::button::ButtonVariants;
 use uuid::Uuid;
 use db::{GlobalDbState, DbNode};
+use one_core::gpui_tokio::Tokio;
 use crate::database_objects_tab::DatabaseObjectsPanel;
 use crate::db_tree_view::DbTreeView;
 
@@ -40,7 +41,7 @@ impl DatabaseEventHandler {
                     Self::handle_node_selected(node.clone(), global_state, objects_panel, cx);
                 }
                 DbTreeViewEvent::CreateNewQuery { node } => {
-                    Self::handle_create_new_query(node.clone(), global_state, tab_container, window, cx);
+                    Self::handle_create_new_query(node.clone(), tab_container, window, cx);
                 }
                 DbTreeViewEvent::OpenTableData { node } => {
                     Self::handle_open_table_data(node.clone(), global_state, tab_container, window, cx);
@@ -76,7 +77,7 @@ impl DatabaseEventHandler {
         let node_type = node.node_type.clone();
         let connection_id = node.connection_id.clone();
 
-        let config = core::gpui_tokio::Tokio::block_on(cx, async move {
+        let config = Tokio::block_on(cx, async move {
             global_state.get_config(&connection_id).await
         });
 
@@ -90,7 +91,6 @@ impl DatabaseEventHandler {
     /// 处理创建新查询事件
     fn handle_create_new_query(
         node: DbNode,
-        global_state: GlobalDbState,
         tab_container: Entity<TabContainer>,
         window: &mut Window,
         cx: &mut App,
@@ -99,27 +99,20 @@ impl DatabaseEventHandler {
 
         let connection_id = node.connection_id.clone();
         // 获取数据库名：如果是数据库节点则用 name，否则用 parent_context
-        let database = node.parent_context.clone().unwrap_or_else(|| node.name.clone());
+        let database = node.name.clone();
+        let sql_editor = SqlEditorTabContent::new_with_config(
+            format!("{} - Query", database),
+            connection_id,
+            Some(database.clone()),
+            window,
+            cx,
+        );
 
-        let config = core::gpui_tokio::Tokio::block_on(cx, async move {
-            global_state.get_config(&connection_id).await
+        tab_container.update(cx, |container, cx| {
+            let tab_id = format!("query-{}-{}", database, Uuid::new_v4());
+            let tab = TabItem::new(tab_id, sql_editor);
+            container.add_and_activate_tab(tab, cx);
         });
-
-        if let Some(config) = config {
-            let sql_editor = SqlEditorTabContent::new_with_config(
-                format!("{} - Query", database),
-                config.id.clone(),
-                Some(database.clone()),
-                window,
-                cx,
-            );
-
-            tab_container.update(cx, |container, cx| {
-                let tab_id = format!("query-{}-{}", database, Uuid::new_v4());
-                let tab = TabItem::new(tab_id, sql_editor);
-                container.add_and_activate_tab(tab, cx);
-            });
-        }
     }
 
     /// 处理打开表数据事件
@@ -138,7 +131,7 @@ impl DatabaseEventHandler {
         let database = metadata.get("database").unwrap();
         let tab_id = format!("table-data-{}.{}", database, table);
 
-        let config = core::gpui_tokio::Tokio::block_on(cx, async move {
+        let config = Tokio::block_on(cx, async move {
             global_state.get_config(&connection_id).await
         });
         if let Some(config) = config {
@@ -183,7 +176,7 @@ impl DatabaseEventHandler {
         let database = metadata.get("database").unwrap();
         let tab_id = format!("view-data-{}.{}", database, view);
 
-        let config = core::gpui_tokio::Tokio::block_on(cx, async move {
+        let config = Tokio::block_on(cx, async move {
             global_state.get_config(&connection_id).await
         });
 
@@ -229,7 +222,7 @@ impl DatabaseEventHandler {
         let database = metadata.get("database").unwrap();
         let tab_id = format!("table-designer-{}.{}", database, table);
 
-        let config = core::gpui_tokio::Tokio::block_on(cx, async move {
+        let config = Tokio::block_on(cx, async move {
             global_state.get_config(&connection_id).await
         });
 
@@ -277,7 +270,7 @@ impl DatabaseEventHandler {
 
         eprintln!("Opening import dialog for database: {}", database);
 
-        let config = core::gpui_tokio::Tokio::block_on(cx, async move {
+        let config = Tokio::block_on(cx, async move {
             global_state.get_config(&connection_id).await
         });
 
@@ -324,7 +317,7 @@ impl DatabaseEventHandler {
             None
         };
 
-        let config = core::gpui_tokio::Tokio::block_on(cx, async move {
+        let config = Tokio::block_on(cx, async move {
             global_state.get_config(&connection_id).await
         });
 

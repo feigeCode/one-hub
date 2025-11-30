@@ -1,6 +1,7 @@
 use crate::executor::{ExecOptions, SqlResult};
-use crate::types::{DbConnectionConfig, SqlValue};
+use crate::types::{ SqlValue};
 use async_trait::async_trait;
+use one_core::storage::DbConnectionConfig;
 
 #[derive(Debug)]
 pub enum DbError {

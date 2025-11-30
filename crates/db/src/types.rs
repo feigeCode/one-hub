@@ -1,4 +1,3 @@
-use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt;
@@ -147,6 +146,17 @@ impl DbNode {
     }
 }
 
+/// Database information
+#[derive(Debug, Clone)]
+pub struct DatabaseInfo {
+    pub name: String,
+    pub charset: Option<String>,
+    pub collation: Option<String>,
+    pub size: Option<String>,
+    pub table_count: Option<i64>,
+    pub comment: Option<String>,
+}
+
 /// Column information
 #[derive(Debug, Clone)]
 pub struct ColumnInfo {
@@ -273,37 +283,6 @@ pub enum DataTypeCategory {
     Binary,
     Structured,
     Other,
-}
-
-/// Database type enumeration
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub enum DatabaseType {
-    MySQL,
-    PostgreSQL,
-}
-
-impl DatabaseType {
-    pub fn as_str(&self) -> &str {
-        match self {
-            DatabaseType::MySQL => "MySQL",
-            DatabaseType::PostgreSQL => "PostgreSQL",
-        }
-    }
-}
-
-/// Connection configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DbConnectionConfig {
-    pub id: String,
-    pub database_type: DatabaseType,
-    pub name: String,
-    pub host: String,
-    pub port: u16,
-    pub username: String,
-    pub password: String,
-    pub database: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub workspace_id: Option<i64>,
 }
 
 // === SQL Operation Request Objects ===

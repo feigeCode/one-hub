@@ -5,6 +5,7 @@ use crate::plugin::DatabasePlugin;
 use crate::types::*;
 use anyhow::Result;
 use std::collections::HashMap;
+use one_core::storage::{DatabaseType, DbConnectionConfig};
 
 /// MySQL database plugin implementation (stateless)
 pub struct MySqlPlugin;
@@ -40,6 +41,46 @@ impl DatabasePlugin for MySqlPlugin {
             Ok(query_result.rows.iter()
                 .filter_map(|row| row.first().and_then(|v| v.clone()))
                 .collect())
+        } else {
+            Err(anyhow::anyhow!("Unexpected result type"))
+        }
+    }
+
+    async fn list_databases_detailed(&self, connection: &dyn DbConnection) -> Result<Vec<DatabaseInfo>> {
+        let result = connection.query(
+            "SELECT 
+                s.SCHEMA_NAME as name,
+                s.DEFAULT_CHARACTER_SET_NAME as charset,
+                s.DEFAULT_COLLATION_NAME as collation,
+                COUNT(t.TABLE_NAME) as table_count
+            FROM INFORMATION_SCHEMA.SCHEMATA s
+            LEFT JOIN INFORMATION_SCHEMA.TABLES t 
+                ON s.SCHEMA_NAME = t.TABLE_SCHEMA AND t.TABLE_TYPE = 'BASE TABLE'
+            GROUP BY s.SCHEMA_NAME, s.DEFAULT_CHARACTER_SET_NAME, s.DEFAULT_COLLATION_NAME
+            ORDER BY s.SCHEMA_NAME",
+            None,
+            ExecOptions::default()
+        ).await.map_err(|e| anyhow::anyhow!("Failed to list databases: {}", e))?;
+
+        if let SqlResult::Query(query_result) = result {
+            let databases: Vec<DatabaseInfo> = query_result.rows.iter()
+                .filter_map(|row| {
+                    let name = row.get(0).and_then(|v| v.clone())?;
+                    let charset = row.get(1).and_then(|v| v.clone());
+                    let collation = row.get(2).and_then(|v| v.clone());
+                    let table_count = row.get(3).and_then(|v| v.clone()).and_then(|s| s.parse::<i64>().ok());
+                    
+                    Some(DatabaseInfo {
+                        name,
+                        charset,
+                        collation,
+                        size: None,
+                        table_count,
+                        comment: None,
+                    })
+                })
+                .collect();
+            Ok(databases)
         } else {
             Err(anyhow::anyhow!("Unexpected result type"))
         }

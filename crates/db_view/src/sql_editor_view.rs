@@ -1,6 +1,6 @@
 use crate::sql_editor::SqlEditor;
 use crate::sql_result_tab::SqlResultTabContainer;
-use core::tab_container::{TabContent, TabContentType};
+use one_core::tab_container::{TabContent, TabContentType};
 use db::{ExecOptions, GlobalDbState};
 use gpui::{div, px, AnyElement, App, AppContext, ClickEvent, Entity, FocusHandle, Focusable, IntoElement, ParentElement, SharedString, Styled, Window};
 use gpui_component::button::{Button, ButtonVariants};

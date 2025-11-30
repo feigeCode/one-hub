@@ -5,14 +5,14 @@ use gpui::{div, px, AnyElement, App, AppContext, Context, ElementId, Entity, Fon
 use gpui::prelude::FluentBuilder;
 use gpui_component::{button::Button, h_flex, input::{Input, InputEvent, InputState}, menu::PopupMenuItem, v_flex, ActiveTheme, IconName, InteractiveElementExt, Selectable, Sizable, Size, ThemeMode};
 
-use core::storage::{ConnectionRepository, ConnectionType, GlobalStorageState, StoredConnection, Workspace, WorkspaceRepository};
-use core::storage::traits::Repository;
-use core::tab_container::{TabContainer, TabContent, TabContentType, TabItem};
-use core::themes::SwitchThemeMode;
-use db::{DatabaseType, DbConnectionConfig};
+use one_core::storage::{ConnectionRepository, ConnectionType, DatabaseType, DbConnectionConfig, GlobalStorageState, StoredConnection, Workspace, WorkspaceRepository};
+use one_core::storage::traits::Repository;
+use one_core::tab_container::{TabContainer, TabContent, TabContentType, TabItem};
+use one_core::themes::SwitchThemeMode;
 use db_view::database_tab::DatabaseTabContent;
 use db_view::db_connection_form::{DbConnectionForm, DbConnectionFormEvent, DbFormConfig};
 use gpui_component::menu::DropdownMenu;
+use one_core::gpui_tokio::Tokio;
 use crate::setting_tab::SettingsTabContent;
 
 // 工作区表单事件
@@ -150,7 +150,7 @@ impl HomePage {
     fn load_workspaces(&mut self, cx: &mut Context<Self>) {
         let storage = cx.global::<GlobalStorageState>().storage.clone();
 
-        let task = core::gpui_tokio::Tokio::spawn(cx, async move {
+        let task = Tokio::spawn(cx, async move {
             let repo = storage.get::<WorkspaceRepository>().await
                 .ok_or_else(|| anyhow::anyhow!("WorkspaceRepository not found"))?;
             let pool = storage.get_pool().await?;
@@ -182,7 +182,7 @@ impl HomePage {
     fn load_connections(&mut self, cx: &mut Context<Self>) {
         let storage = cx.global::<GlobalStorageState>().storage.clone();
 
-        let task = core::gpui_tokio::Tokio::spawn(cx, async move {
+        let task = Tokio::spawn(cx, async move {
             let repo = storage.get::<ConnectionRepository>().await
                 .ok_or_else(|| anyhow::anyhow!("ConnectionRepository not found"))?;
             let pool = storage.get_pool().await?;
@@ -236,7 +236,7 @@ impl HomePage {
     fn handle_save_workspace(&mut self, name: String, cx: &mut Context<Self>) {
         let storage = cx.global::<GlobalStorageState>().storage.clone();
         
-        let task = core::gpui_tokio::Tokio::spawn(cx, async move {
+        let task = Tokio::spawn(cx, async move {
             let repo = storage.get::<WorkspaceRepository>().await
                 .ok_or_else(|| anyhow::anyhow!("WorkspaceRepository not found"))?;
             let pool = storage.get_pool().await?;
@@ -375,7 +375,7 @@ impl HomePage {
 
         let storage = cx.global::<GlobalStorageState>().storage.clone();
 
-        let task = core::gpui_tokio::Tokio::spawn(cx, async move {
+        let task = Tokio::spawn(cx, async move {
             let repo = storage.get::<ConnectionRepository>().await
                 .ok_or_else(|| anyhow::anyhow!("ConnectionRepository not found"))?;
             let pool = storage.get_pool().await?;

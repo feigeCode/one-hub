@@ -4,6 +4,7 @@ use crate::executor::{ExecOptions, SqlResult};
 use crate::types::*;
 use anyhow::Result;
 use async_trait::async_trait;
+use one_core::storage::{DatabaseType, DbConnectionConfig};
 
 /// Database plugin trait for supporting multiple database types
 #[async_trait]
@@ -26,6 +27,7 @@ pub trait DatabasePlugin: Send + Sync {
 
     // === Database/Schema Level Operations ===
     async fn list_databases(&self, connection: &dyn DbConnection) -> Result<Vec<String>>;
+    async fn list_databases_detailed(&self, connection: &dyn DbConnection) -> Result<Vec<DatabaseInfo>>;
     fn generate_create_database_sql(&self, request: &CreateDatabaseRequest) -> Result<String>;
     fn generate_drop_database_sql(&self, request: &DropDatabaseRequest) -> Result<String>;
     fn generate_alter_database_sql(&self, request: &AlterDatabaseRequest) -> Result<String>;

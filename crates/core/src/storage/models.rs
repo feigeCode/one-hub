@@ -1,4 +1,3 @@
-use db::{DatabaseType, DbConnectionConfig};
 use gpui_component::IconName;
 use serde::{Deserialize, Serialize};
 
@@ -11,6 +10,46 @@ pub enum ConnectionType {
     SshSftp,
     Redis,
     MongoDB,
+}
+
+/// Database type enumeration
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub enum DatabaseType {
+    MySQL,
+    PostgreSQL,
+}
+
+impl DatabaseType {
+    pub fn as_str(&self) -> &str {
+        match self {
+            DatabaseType::MySQL => "MySQL",
+            DatabaseType::PostgreSQL => "PostgreSQL",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "MySQL" => Some(DatabaseType::MySQL),
+            "PostgreSQL" => Some(DatabaseType::PostgreSQL),
+            _ => None,
+        }
+    }
+}
+
+
+/// Connection configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DbConnectionConfig {
+    pub id: String,
+    pub database_type: DatabaseType,
+    pub name: String,
+    pub host: String,
+    pub port: u16,
+    pub username: String,
+    pub password: String,
+    pub database: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<i64>,
 }
 
 impl ConnectionType {

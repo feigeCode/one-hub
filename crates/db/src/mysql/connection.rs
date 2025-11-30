@@ -1,5 +1,4 @@
 use crate::connection::{DbConnection, DbError};
-use crate::types::{DbConnectionConfig, SqlValue};
 use crate::executor::{ExecOptions, ExecResult, QueryResult, SqlErrorInfo, SqlResult, SqlScriptSplitter, SqlStatementClassifier};
 use crate::runtime::TOKIO_HANDLE;
 use sqlx::mysql::{MySqlArguments, MySqlPoolOptions, MySqlRow};
@@ -9,6 +8,8 @@ use async_trait::async_trait;
 use std::sync::RwLock;
 use sqlx::types::chrono;
 use sqlx::types::chrono::Utc;
+use one_core::storage::DbConnectionConfig;
+use crate::{SqlValue};
 
 pub struct MysqlDbConnection {
     config: Option<DbConnectionConfig>,

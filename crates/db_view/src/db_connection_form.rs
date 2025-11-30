@@ -8,8 +8,7 @@ use gpui_component::{
     v_flex, ActiveTheme, Disableable, Sizable, Size, StyledExt,
 };
 use gpui_component::form::{field, v_form};
-
-use db::{DatabaseType, DbConnectionConfig};
+use one_core::storage::{DatabaseType, DbConnectionConfig, StoredConnection, Workspace};
 
 /// Represents a tab group containing multiple fields
 #[derive(Clone, Debug)]
@@ -186,7 +185,7 @@ pub struct DbConnectionForm {
     field_inputs: Vec<Entity<InputState>>,
     is_testing: Entity<bool>,
     test_result: Entity<Option<Result<bool, String>>>,
-    workspaces: Vec<core::storage::Workspace>,
+    workspaces: Vec<Workspace>,
     selected_workspace_id: Entity<Option<i64>>,
 }
 
@@ -252,12 +251,12 @@ impl DbConnectionForm {
         }
     }
 
-    pub fn set_workspaces(&mut self, workspaces: Vec<core::storage::Workspace>, cx: &mut Context<Self>) {
+    pub fn set_workspaces(&mut self, workspaces: Vec<Workspace>, cx: &mut Context<Self>) {
         self.workspaces = workspaces;
         cx.notify();
     }
 
-    pub fn load_connection(&mut self, connection: &core::storage::StoredConnection, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn load_connection(&mut self, connection: &StoredConnection, window: &mut Window, cx: &mut Context<Self>) {
         // Update form values from connection
         self.set_field_value("name", &connection.name, window, cx);
         self.set_field_value("host", &connection.host, window, cx);

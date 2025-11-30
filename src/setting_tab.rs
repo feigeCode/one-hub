@@ -1,7 +1,7 @@
 use std::any::Any;
 use gpui::{div, AnyElement, App, FontWeight, IntoElement, ParentElement, SharedString, Styled, Window};
 use gpui_component::{v_flex, ActiveTheme, IconName};
-use core::tab_container::{TabContent, TabContentType};
+use one_core::tab_container::{TabContent, TabContentType};
 
 pub struct SettingsTabContent;
 

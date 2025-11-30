@@ -40,7 +40,7 @@ tokio-util = "0.7.17"
 assets = { path = "crates/assets" }
 db = { path = "crates/db" }
 db_view = { path = "crates/db_view" }
-core = { path = "crates/core" }
+one-core = { path = "crates/core" }
 dirs = "6.0"
 uuid = { version = "1.11", features = ["v4"] }
 chrono = "0.4.23"
@@ -101,7 +101,7 @@ async-trait = { workspace = true }
 assets = { workspace = true }
 db = { workspace = true }
 db_view = { workspace = true }
-core.workspace = true
+one-core.workspace = true
 [profile.release]
 opt-level = "s"
 lto = "fat"

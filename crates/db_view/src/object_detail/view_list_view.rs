@@ -75,14 +75,19 @@ impl ViewListView {
 
         v_flex()
             .size_full()
-            .p_2()
             .gap_2()
             .child(
                 div()
+                    .p_2()
                     .text_sm()
                     .font_semibold()
                     .child(format!("{} view(s)", view_count)),
             )
-            .child(Table::new(&state).stripe(true).bordered(true))
+            .child(
+                div()
+                    .flex_1()
+                    .overflow_hidden()
+                    .child(Table::new(&state).stripe(true).bordered(true))
+            )
     }
 }

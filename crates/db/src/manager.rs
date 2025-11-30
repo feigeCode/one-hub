@@ -1,6 +1,5 @@
 use crate::connection::{DbConnection, DbError};
 use crate::plugin::DatabasePlugin;
-use crate::types::{DatabaseType, DbConnectionConfig};
 use crate::mysql::MySqlPlugin;
 use crate::postgresql::PostgresPlugin;
 use std::collections::HashMap;
@@ -9,6 +8,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use tokio::time;
 use gpui::Global;
+use one_core::storage::{DatabaseType, DbConnectionConfig};
 
 pub struct DbManager {}
 

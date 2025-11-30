@@ -3,14 +3,16 @@ use gpui::{
 };
 use gpui_component::{v_flex, ActiveTheme};
 use db::types::DbNodeType;
+use one_core::storage::DbConnectionConfig;
 use super::{
-    ColumnListView, FunctionListView, TableListView, ViewListView,
+    DatabaseListView, ColumnListView, FunctionListView, TableListView, ViewListView,
 };
 
 /// Represents the currently selected node and what should be displayed
 #[derive(Debug, Clone)]
 pub enum SelectedNode {
     None,
+    Connection { id: String },
     Database { name: String },
     TablesFolder { database: String },
     Table { database: String, name: String },
@@ -31,6 +33,11 @@ impl SelectedNode {
         let parts: Vec<&str> = node_id.split(':').collect();
 
         match node_type {
+            DbNodeType::Connection => {
+                SelectedNode::Connection {
+                    id: node_id.to_string(),
+                }
+            }
             DbNodeType::Database => {
                 if parts.len() >= 2 {
                     SelectedNode::Database {
@@ -144,6 +151,7 @@ impl SelectedNode {
 /// Data loaded for display
 #[derive(Clone)]
 enum LoadedData {
+    Databases(Vec<db::types::DatabaseInfo>),
     Tables(Vec<db::types::TableInfo>),
     Columns(String, Vec<db::types::ColumnInfo>),
     Views(Vec<db::types::ViewInfo>),
@@ -155,7 +163,7 @@ enum LoadedData {
 pub struct ObjectDetailView {
     selected_node: Entity<SelectedNode>,
     loaded_data: Entity<LoadedData>,
-    config: Entity<Option<db::DbConnectionConfig>>,
+    config: Entity<Option<DbConnectionConfig>>,
 }
 
 impl ObjectDetailView {
@@ -175,7 +183,7 @@ impl ObjectDetailView {
     pub fn set_selected_node(
         &self,
         node: SelectedNode,
-        config: db::DbConnectionConfig,
+        config: DbConnectionConfig,
         cx: &mut App,
     ) {
         self.selected_node.update(cx, |n, cx| {
@@ -194,7 +202,7 @@ impl ObjectDetailView {
     fn load_data_for_node(
         &self,
         node: SelectedNode,
-        config: db::DbConnectionConfig,
+        config: DbConnectionConfig,
         cx: &mut App,
     ) {
         let loaded_data = self.loaded_data.clone();
@@ -215,6 +223,16 @@ impl ObjectDetailView {
             let conn = conn_arc.read().await;
 
             match node {
+                SelectedNode::Connection { .. } => {
+                    if let Ok(databases) = plugin.list_databases_detailed(&**conn).await {
+                        cx.update(|cx| {
+                            loaded_data.update(cx, |data, cx| {
+                                *data = LoadedData::Databases(databases);
+                                cx.notify();
+                            });
+                        }).ok();
+                    }
+                }
                 SelectedNode::Database { ref name } | SelectedNode::TablesFolder { database: ref name } => {
                     if let Ok(tables) = plugin.list_tables(&**conn, name).await {
                         cx.update(|cx| {
@@ -288,6 +306,9 @@ impl Render for ObjectDetailView {
         let selected_node = self.selected_node.read(cx).clone();
 
         div().size_full().child(match loaded_data {
+            LoadedData::Databases(databases) => {
+                DatabaseListView::new(databases, window, cx).into_any_element()
+            }
             LoadedData::Tables(tables) => {
                 TableListView::new(tables, window, cx).into_any_element()
             }
