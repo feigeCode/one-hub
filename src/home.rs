@@ -567,14 +567,14 @@ impl HomePage {
                             .label("切换主题")
                             .w_full()
                             .justify_start()
-                            .on_click(cx.listener(|_this: &mut HomePage, _, _window, cx| {
+                            .on_click(cx.listener(|_this: &mut HomePage, _, window, cx| {
                                 // 切换主题模式
                                 let current_mode = cx.theme().mode;
                                 let new_mode = match current_mode {
                                     ThemeMode::Light => ThemeMode::Dark,
                                     ThemeMode::Dark => ThemeMode::Light,
                                 };
-                                cx.dispatch_action(&SwitchThemeMode(new_mode));
+                                window.dispatch_action(Box::new(SwitchThemeMode(new_mode)), cx);
                             }))
                     )
                     .child(

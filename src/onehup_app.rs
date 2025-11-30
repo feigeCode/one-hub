@@ -33,10 +33,23 @@ pub struct OneHupApp {
 impl OneHupApp {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         // 创建标签容器，根据平台设置 padding
+        // 使用深色标签栏配色方案
         let tab_container = cx.new(|cx| {
             let mut container = TabContainer::new(window, cx)
+                .with_tab_bar_colors(
+                    Some(gpui::rgb(0x2b2b2b).into()),
+                    Some(gpui::rgb(0x1e1e1e).into()),
+                )
+                .with_tab_item_colors(
+                    Some(gpui::rgb(0x555555).into()),
+                    Some(gpui::rgb(0x3a3a3a).into()),
+                )
                 .with_inactive_tab_bg_color(Some(gpui::rgb(0x3a3a3a).into()))
-                .with_tab_icon_color(Some(gpui::rgb(0xffffff).into()));
+                .with_tab_content_colors(
+                    Some(gpui::white().into()),
+                    Some(gpui::rgb(0xaaaaaa).into()),
+                )
+                .with_tab_icon_color(Some(gpui::rgb(0xaaaaaa).into()));
             
             // macOS: 为红黄绿按钮留出空间并垂直居中
             #[cfg(target_os = "macos")]

@@ -374,21 +374,9 @@ impl DatabaseTabContent {
             DbTreeView::new(&connections, window, cx)
         });
 
-        // Create tab container
+        // Create tab container - use default theme colors for automatic theme switching
         let tab_container = cx.new(|cx| {
             TabContainer::new(window, cx)
-                .with_tab_bar_colors(
-                    Some(gpui::rgb(0xf5f5f5).into()),
-                    Some(gpui::rgb(0xe0e0e0).into()),
-                )
-                .with_tab_item_colors(
-                    Some(gpui::rgb(0xffffff).into()),
-                    Some(gpui::rgb(0xe8e8e8).into()),
-                )
-                .with_tab_content_colors(
-                    Some(gpui::rgb(0x333333).into()),
-                    Some(gpui::rgb(0x666666).into()),
-                )
         });
 
         // Create objects panel
