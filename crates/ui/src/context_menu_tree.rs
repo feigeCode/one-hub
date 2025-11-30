@@ -334,6 +334,7 @@ impl RenderOnce for ContextMenuTree {
                                     .on_mouse_down(MouseButton::Left, {
                                         let state = state.clone();
                                         move |_, window, cx| {
+                                            cx.stop_propagation();
                                             Self::on_toggle_expand(&state, ix, window, cx);
                                         }
                                     })

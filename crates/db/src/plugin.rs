@@ -105,7 +105,8 @@ pub trait DatabasePlugin: Send + Sync {
         let mut nodes = Vec::new();
         let database = &node.name;
         let id = &node.id;
-
+        let mut metadata: HashMap<String, String> = HashMap::new();
+        metadata.insert("database".to_string(), database.to_string());
         // Tables folder
         let tables = self.list_tables(connection, database).await?;
         let table_count = tables.len();
@@ -114,22 +115,20 @@ pub trait DatabasePlugin: Send + Sync {
             format!("Tables ({})", table_count),
             DbNodeType::TablesFolder,
             node.connection_id.clone()
-        ).with_parent_context(id);
+        ).with_parent_context(id).with_metadata(metadata.clone());
 
         if table_count > 0 {
             let children: Vec<DbNode> = tables
                 .into_iter()
                 .map(|table_info| {
-                    let mut metadata: HashMap<String, String> = HashMap::new();
-                    metadata.insert("database".to_string(), database.to_string());
-                    
+                    let mut metadata: HashMap<String, String> = HashMap::from(metadata.clone());
                     // Add comment as additional metadata if available
                     if let Some(comment) = &table_info.comment {
                         if !comment.is_empty() {
                             metadata.insert("comment".to_string(), comment.clone());
                         }
                     }
-                    
+
                     DbNode::new(
                         format!("{}:table_folder:{}", id, table_info.name),
                         table_info.name.clone(),
@@ -156,12 +155,12 @@ pub trait DatabasePlugin: Send + Sync {
                 format!("Views ({})", view_count),
                 DbNodeType::ViewsFolder,
                 node.connection_id.clone()
-            ).with_parent_context(id);
+            ).with_parent_context(id).with_metadata(metadata.clone());
 
             let children: Vec<DbNode> = views
                 .into_iter()
                 .map(|view| {
-                    let mut metadata = HashMap::new();
+                    let mut metadata: HashMap<String, String> = HashMap::from(metadata.clone());
                     if let Some(comment) = view.comment {
                         metadata.insert("comment".to_string(), comment);
                     }
@@ -348,5 +347,52 @@ pub trait DatabasePlugin: Send + Sync {
             DataTypeInfo::new("BOOLEAN", "True/False"),
             DataTypeInfo::new("DECIMAL(10,2)", "Decimal number"),
         ]
+    }
+
+    // === DDL Operations ===
+    /// Drop database
+    async fn drop_database(&self, connection: &dyn DbConnection, database: &str) -> Result<()> {
+        let query = format!("DROP DATABASE IF EXISTS {}", self.quote_identifier(database));
+        self.execute_query(connection, "", &query, None).await?;
+        Ok(())
+    }
+
+    /// Drop table
+    async fn drop_table(&self, connection: &dyn DbConnection, database: &str, table: &str) -> Result<()> {
+        let query = format!("DROP TABLE IF EXISTS {}", self.quote_identifier(table));
+        self.execute_query(connection, database, &query, None).await?;
+        Ok(())
+    }
+
+    /// Truncate table
+    async fn truncate_table(&self, connection: &dyn DbConnection, database: &str, table: &str) -> Result<()> {
+        let query = format!("TRUNCATE TABLE {}", self.quote_identifier(table));
+        self.execute_query(connection, database, &query, None).await?;
+        Ok(())
+    }
+
+    /// Rename table
+    async fn rename_table(&self, connection: &dyn DbConnection, database: &str, old_name: &str, new_name: &str) -> Result<()> {
+        let query = match self.name() {
+            DatabaseType::MySQL => format!(
+                "RENAME TABLE {} TO {}",
+                self.quote_identifier(old_name),
+                self.quote_identifier(new_name)
+            ),
+            DatabaseType::PostgreSQL => format!(
+                "ALTER TABLE {} RENAME TO {}",
+                self.quote_identifier(old_name),
+                self.quote_identifier(new_name)
+            ),
+        };
+        self.execute_query(connection, database, &query, None).await?;
+        Ok(())
+    }
+
+    /// Drop view
+    async fn drop_view(&self, connection: &dyn DbConnection, database: &str, view: &str) -> Result<()> {
+        let query = format!("DROP VIEW IF EXISTS {}", self.quote_identifier(view));
+        self.execute_query(connection, database, &query, None).await?;
+        Ok(())
     }
 }

@@ -2,9 +2,57 @@ use std::any::Any;
 
 use db::{DbNode, DbNodeType, GlobalDbState};
 use gpui::{div, px, prelude::FluentBuilder, AnyElement, App, AppContext, Context, Entity, FontWeight, Hsla, IntoElement, ParentElement, SharedString, Styled, Subscription, Window};
-use gpui_component::{button::ButtonVariants, h_flex, resizable::{h_resizable, resizable_panel}, v_flex, ActiveTheme, IconName};
+use gpui_component::{button::ButtonVariants, h_flex, resizable::{h_resizable, resizable_panel}, v_flex, ActiveTheme, IconName, WindowExt};
 use one_core::{gpui_tokio::Tokio, storage::StoredConnection, tab_container::{TabContainer, TabContent, TabContentType, TabItem}};
 use uuid::Uuid;
+
+// 字符集选择项
+#[derive(Clone, Debug)]
+struct CharsetItem {
+    name: String,
+}
+
+impl CharsetItem {
+    fn new(name: impl Into<String>) -> Self {
+        Self { name: name.into() }
+    }
+}
+
+impl gpui_component::select::SelectItem for CharsetItem {
+    type Value = String;
+
+    fn title(&self) -> SharedString {
+        self.name.clone().into()
+    }
+
+    fn value(&self) -> &Self::Value {
+        &self.name
+    }
+}
+
+// 排序规则选择项
+#[derive(Clone, Debug)]
+struct CollationItem {
+    name: String,
+}
+
+impl CollationItem {
+    fn new(name: impl Into<String>) -> Self {
+        Self { name: name.into() }
+    }
+}
+
+impl gpui_component::select::SelectItem for CollationItem {
+    type Value = String;
+
+    fn title(&self) -> SharedString {
+        self.name.clone().into()
+    }
+
+    fn value(&self) -> &Self::Value {
+        &self.name
+    }
+}
 
 use crate::{database_objects_tab::DatabaseObjectsPanel, db_tree_view::{DbTreeView, DbTreeViewEvent}};
 
@@ -25,11 +73,13 @@ impl DatabaseEventHandler {
         let tab_container_clone = tab_container.clone();
         let objects_panel_clone = objects_panel.clone();
         let global_state = cx.global::<GlobalDbState>().clone();
+        let tree_view_clone = db_tree_view.clone();
 
         let tree_subscription = cx.subscribe_in(db_tree_view, window, move |_handler, _tree, event, window, cx| {
             let global_state = global_state.clone();
             let tab_container = tab_container_clone.clone();
             let objects_panel = objects_panel_clone.clone();
+            let tree_view = tree_view_clone.clone();
 
             match event {
                 DbTreeViewEvent::NodeSelected { node } => {
@@ -52,6 +102,36 @@ impl DatabaseEventHandler {
                 }
                 DbTreeViewEvent::ExportData { node } => {
                     Self::handle_export_data(node.clone(), global_state, window, cx);
+                }
+                DbTreeViewEvent::CloseConnection { node } => {
+                    Self::handle_close_connection(node.clone(), global_state, window, cx);
+                }
+                DbTreeViewEvent::EditConnection { node } => {
+                    Self::handle_edit_connection(node.clone(), window, cx);
+                }
+                DbTreeViewEvent::DeleteConnection { node } => {
+                    Self::handle_delete_connection(node.clone(), tree_view.clone(), window, cx);
+                }
+                DbTreeViewEvent::EditDatabase { node } => {
+                    Self::handle_edit_database(node.clone(), global_state, window, cx);
+                }
+                DbTreeViewEvent::CloseDatabase { node } => {
+                    Self::handle_close_database(node.clone(), global_state, window, cx);
+                }
+                DbTreeViewEvent::DeleteDatabase { node } => {
+                    Self::handle_delete_database(node.clone(), global_state, tree_view.clone(), window, cx);
+                }
+                DbTreeViewEvent::DeleteTable { node } => {
+                    Self::handle_delete_table(node.clone(), global_state, tree_view.clone(), window, cx);
+                }
+                DbTreeViewEvent::RenameTable { node } => {
+                    Self::handle_rename_table(node.clone(), global_state, window, cx);
+                }
+                DbTreeViewEvent::TruncateTable { node } => {
+                    Self::handle_truncate_table(node.clone(), global_state, tree_view.clone(), window, cx);
+                }
+                DbTreeViewEvent::DeleteView { node } => {
+                    Self::handle_delete_view(node.clone(), global_state, tree_view.clone(), window, cx);
                 }
             }
         });
@@ -387,6 +467,518 @@ impl DatabaseEventHandler {
             });
         }
     }
+
+    /// 处理关闭连接事件
+    fn handle_close_connection(
+        node: DbNode,
+        _global_state: GlobalDbState,
+        _window: &mut Window,
+        _cx: &mut App,
+    ) {
+        eprintln!("Close connection: {}", node.connection_id);
+        // TODO: 实现关闭连接逻辑
+    }
+
+    /// 处理编辑连接事件
+    fn handle_edit_connection(
+        node: DbNode,
+        _window: &mut Window,
+        cx: &mut App,
+    ) {
+        use one_core::storage::traits::Repository;
+        use one_core::storage::{ConnectionRepository, GlobalStorageState};
+
+        let connection_id = node.connection_id.clone();
+        let storage_manager = cx.global::<GlobalStorageState>().storage.clone();
+
+        let conn_id_log = connection_id.clone();
+        let result = Tokio::block_on(cx, async move {
+            let pool = storage_manager.get_pool().await.ok()?;
+            let conn_id = connection_id.parse::<i64>().ok()?;
+            let conn_repo_arc = storage_manager.get::<ConnectionRepository>().await?;
+            let conn_repo = (*conn_repo_arc).clone();
+            conn_repo.get(&pool, conn_id).await.ok()?
+        });
+
+        if let Some(_connection) = result {
+            eprintln!("Edit connection: {}", conn_id_log);
+            // TODO: 实现编辑连接对话框
+        }
+    }
+
+    /// 处理删除连接事件
+    fn handle_delete_connection(
+        node: DbNode,
+        tree_view: Entity<DbTreeView>,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        use one_core::storage::traits::Repository;
+        use one_core::storage::{ConnectionRepository, GlobalStorageState};
+
+        let connection_id = node.connection_id.clone();
+        let connection_name = node.name.clone();
+        let storage_manager = cx.global::<GlobalStorageState>().storage.clone();
+
+        window.open_dialog(cx, move |dialog, _window, _cx| {
+            let conn_id = connection_id.clone();
+            let conn_name = connection_name.clone();
+            let storage = storage_manager.clone();
+            let tree = tree_view.clone();
+            
+            dialog
+                .title("确认删除")
+                .confirm()
+                .child(
+                    v_flex()
+                        .gap_2()
+                        .child(format!("确定要删除连接 \"{}\" 吗？", conn_name))
+                        .child("此操作不可恢复。")
+                )
+                .on_ok(move |_, _, cx| {
+                    let conn_id = conn_id.clone();
+                    let storage = storage.clone();
+                    let tree = tree.clone();
+                    cx.spawn(async move |cx| {
+                        if let Ok(pool) = storage.get_pool().await {
+                            if let Ok(id) = conn_id.parse::<i64>() {
+                                if let Some(conn_repo_arc) = storage.get::<ConnectionRepository>().await {
+                                    let conn_repo = (*conn_repo_arc).clone();
+                                    let _ = conn_repo.delete(&pool, id).await;
+                                    eprintln!("Connection deleted: {}", conn_id);
+                                    
+                                    // 刷新树
+                                    let _ = cx.update(|cx| {
+                                        tree.update(cx, |tree, cx| {
+                                            tree.refresh_tree(conn_id.clone(), cx);
+                                        });
+                                    });
+                                }
+                            }
+                        }
+                    }).detach();
+                    true
+                })
+        });
+    }
+
+    /// 处理编辑数据库事件
+    fn handle_edit_database(
+        node: DbNode,
+        global_state: GlobalDbState,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let connection_id = node.connection_id.clone();
+        let database_name = node.name.clone();
+
+        let config = Tokio::block_on(cx, async move {
+            global_state.get_config(&connection_id).await
+        });
+
+        if let Some(config) = config {
+            Self::show_edit_database_dialog(database_name, config, window, cx);
+        }
+    }
+
+    /// 显示编辑数据库对话框
+    fn show_edit_database_dialog(
+        database_name: String,
+        config: one_core::storage::DbConnectionConfig,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        use gpui_component::select::{Select, SelectItem, SelectState};
+
+        // 创建字符集选择器
+        let charset_items = vec![
+            CharsetItem::new("utf8mb3"),
+            CharsetItem::new("utf8mb4"),
+            CharsetItem::new("latin1"),
+            CharsetItem::new("gbk"),
+            CharsetItem::new("utf8"),
+        ];
+        let charset_select = cx.new(|cx| {
+            SelectState::new(charset_items, Some(Default::default()), window, cx)
+        });
+
+        // 创建排序规则选择器
+        let collation_items = vec![
+            CollationItem::new("utf8mb4_general_ci"),
+            CollationItem::new("utf8mb4_unicode_ci"),
+            CollationItem::new("utf8mb4_bin"),
+            CollationItem::new("utf8mb3_general_ci"),
+            CollationItem::new("utf8mb3_unicode_ci"),
+            CollationItem::new("latin1_swedish_ci"),
+            CollationItem::new("gbk_chinese_ci"),
+        ];
+        let collation_select = cx.new(|cx| {
+            SelectState::new(collation_items, Some(Default::default()), window, cx)
+        });
+
+        let db_name = database_name.clone();
+        let config_id = config.id.clone();
+
+        window.open_dialog(cx, move |dialog, _window, _cx| {
+            let charset_sel = charset_select.clone();
+            let collation_sel = collation_select.clone();
+            let db_name_display = db_name.clone();
+            let db_name_for_update = db_name.clone();
+            let cfg_id = config_id.clone();
+
+            dialog
+                .title("编辑数据库")
+                .confirm()
+                .child(
+                    v_flex()
+                        .gap_4()
+                        .p_4()
+                        .child(
+                            h_flex()
+                                .gap_2()
+                                .items_center()
+                                .child(
+                                    div()
+                                        .w(px(100.))
+                                        .child("数据库名称:")
+                                )
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .child(db_name_display.clone())
+                                )
+                        )
+                        .child(
+                            h_flex()
+                                .gap_2()
+                                .items_center()
+                                .child(
+                                    div()
+                                        .w(px(100.))
+                                        .child("字符集:")
+                                )
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .child(Select::new(&charset_sel))
+                                )
+                        )
+                        .child(
+                            h_flex()
+                                .gap_2()
+                                .items_center()
+                                .child(
+                                    div()
+                                        .w(px(100.))
+                                        .child("排序规则:")
+                                )
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .child(Select::new(&collation_sel))
+                                )
+                        )
+                )
+                .on_ok(move |_, _, cx| {
+                    let charset = charset_sel.read(cx).selected_value().cloned();
+                    let collation = collation_sel.read(cx).selected_value().cloned();
+                    let db_name = db_name_for_update.clone();
+                    let config_id = cfg_id.clone();
+                    let global_state = cx.global::<GlobalDbState>().clone();
+                    let db_name_log = db_name.clone();
+
+                    cx.spawn(async move |_cx| {
+                        let result = db::spawn_result(async move {
+                            let (plugin, conn_arc) = global_state.get_plugin_and_connection(&config_id).await?;
+                            let conn = conn_arc.read().await;
+                            
+                            // 构建 ALTER DATABASE 语句
+                            let mut sql = format!("ALTER DATABASE {} ", plugin.quote_identifier(&db_name));
+                            if let Some(cs) = charset {
+                                sql.push_str(&format!("CHARACTER SET {} ", cs));
+                            }
+                            if let Some(col) = collation {
+                                sql.push_str(&format!("COLLATE {}", col));
+                            }
+                            
+                            plugin.execute_query(&**conn, "", &sql, None).await?;
+                            Ok(())
+                        }).await;
+
+                        match result {
+                            Ok(_) => eprintln!("Database updated: {}", db_name_log),
+                            Err(e) => eprintln!("Failed to update database: {}", e),
+                        }
+                    }).detach();
+                    true
+                })
+        });
+    }
+
+    /// 处理关闭数据库事件
+    fn handle_close_database(
+        node: DbNode,
+        _global_state: GlobalDbState,
+        _window: &mut Window,
+        _cx: &mut App,
+    ) {
+        eprintln!("Close database: {}", node.name);
+    }
+
+    /// 处理删除数据库事件
+    fn handle_delete_database(
+        node: DbNode,
+        global_state: GlobalDbState,
+        tree_view: Entity<DbTreeView>,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let connection_id = node.connection_id.clone();
+        let database_name = node.name.clone();
+
+        window.open_dialog(cx, move |dialog, _window, _cx| {
+            let conn_id = connection_id.clone();
+            let db_name = database_name.clone();
+            let state = global_state.clone();
+            let db_name_display = database_name.clone();
+            let tree = tree_view.clone();
+            
+            dialog
+                .title("确认删除")
+                .confirm()
+                .child(
+                    v_flex()
+                        .gap_2()
+                        .child(format!("确定要删除数据库 \"{}\" 吗？", db_name_display))
+                        .child("此操作将删除数据库中的所有数据，不可恢复！")
+                )
+                .on_ok(move |_, _, cx| {
+                    let conn_id = conn_id.clone();
+                    let db_name = db_name.clone();
+                    let state = state.clone();
+                    let db_name_log = db_name.clone();
+                    let tree = tree.clone();
+                    let conn_id_for_refresh = conn_id.clone();
+                    
+                    cx.spawn(async move |cx| {
+                        let result = db::spawn_result(async move {
+                            let (plugin, conn_arc) = state.get_plugin_and_connection(&conn_id).await?;
+                            let conn = conn_arc.read().await;
+                            plugin.drop_database(&**conn, &db_name).await
+                        }).await;
+
+                        match result {
+                            Ok(_) => {
+                                eprintln!("Database deleted: {}", db_name_log);
+                                // 刷新父节点（连接节点）
+                                let _ = cx.update(|cx| {
+                                    tree.update(cx, |tree, cx| {
+                                        tree.refresh_tree(conn_id_for_refresh, cx);
+                                    });
+                                });
+                            }
+                            Err(e) => eprintln!("Failed to delete database: {}", e),
+                        }
+                    }).detach();
+                    true
+                })
+        });
+    }
+
+    /// 处理删除表事件
+    fn handle_delete_table(
+        node: DbNode,
+        global_state: GlobalDbState,
+        tree_view: Entity<DbTreeView>,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let connection_id = node.connection_id.clone();
+        let table_name = node.name.clone();
+        let metadata = node.metadata.clone();
+
+        window.open_dialog(cx, move |dialog, _window, _cx| {
+            let conn_id = connection_id.clone();
+            let tbl_name = table_name.clone();
+            let meta = metadata.clone();
+            let state = global_state.clone();
+            let tbl_name_display = table_name.clone();
+            let tree = tree_view.clone();
+            
+            dialog
+                .title("确认删除")
+                .confirm()
+                .child(
+                    v_flex()
+                        .gap_2()
+                        .child(format!("确定要删除表 \"{}\" 吗？", tbl_name_display))
+                        .child("此操作将删除表中的所有数据，不可恢复！")
+                )
+                .on_ok(move |_, _, cx| {
+                    let conn_id = conn_id.clone();
+                    let tbl_name = tbl_name.clone();
+                    let meta = meta.clone();
+                    let state = state.clone();
+                    let tbl_name_log = tbl_name.clone();
+                    let tree = tree.clone();
+                    let db_node_id = format!("{}:{}", conn_id, meta.as_ref().and_then(|m| m.get("database")).unwrap_or(&String::new()));
+                    
+                    cx.spawn(async move |cx| {
+                        let result = db::spawn_result(async move {
+                            let (plugin, conn_arc) = state.get_plugin_and_connection(&conn_id).await?;
+                            let conn = conn_arc.read().await;
+                            let database = meta.as_ref().and_then(|m| m.get("database")).map(|s| s.as_str()).unwrap_or("");
+                            plugin.drop_table(&**conn, database, &tbl_name).await
+                        }).await;
+
+                        match result {
+                            Ok(_) => {
+                                eprintln!("Table deleted: {}", tbl_name_log);
+                                // 刷新数据库节点
+                                let _ = cx.update(|cx| {
+                                    tree.update(cx, |tree, cx| {
+                                        tree.refresh_tree(db_node_id, cx);
+                                    });
+                                });
+                            }
+                            Err(e) => eprintln!("Failed to delete table: {}", e),
+                        }
+                    }).detach();
+                    true
+                })
+        });
+    }
+
+    /// 处理重命名表事件
+    fn handle_rename_table(
+        node: DbNode,
+        _global_state: GlobalDbState,
+        _window: &mut Window,
+        _cx: &mut App,
+    ) {
+        eprintln!("Rename table: {}", node.name);
+        // TODO: 实现重命名表对话框
+    }
+
+    /// 处理清空表事件
+    fn handle_truncate_table(
+        node: DbNode,
+        global_state: GlobalDbState,
+        _tree_view: Entity<DbTreeView>,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let connection_id = node.connection_id.clone();
+        let table_name = node.name.clone();
+        let metadata = node.metadata.clone();
+
+        window.open_dialog(cx, move |dialog, _window, _cx| {
+            let conn_id = connection_id.clone();
+            let tbl_name = table_name.clone();
+            let meta = metadata.clone();
+            let state = global_state.clone();
+            let tbl_name_display = table_name.clone();
+            
+            dialog
+                .title("确认清空")
+                .confirm()
+                .child(
+                    v_flex()
+                        .gap_2()
+                        .child(format!("确定要清空表 \"{}\" 吗？", tbl_name_display))
+                        .child("此操作将删除表中的所有数据，但保留表结构，不可恢复！")
+                )
+                .on_ok(move |_, _, cx| {
+                    let conn_id = conn_id.clone();
+                    let tbl_name = tbl_name.clone();
+                    let meta = meta.clone();
+                    let state = state.clone();
+                    let tbl_name_log = tbl_name.clone();
+                    
+                    cx.spawn(async move |_cx| {
+                        let result = db::spawn_result(async move {
+                            let (plugin, conn_arc) = state.get_plugin_and_connection(&conn_id).await?;
+                            let conn = conn_arc.read().await;
+                            let database = meta.as_ref().and_then(|m| m.get("database")).map(|s| s.as_str()).unwrap_or("");
+                            plugin.truncate_table(&**conn, database, &tbl_name).await
+                        }).await;
+
+                        match result {
+                            Ok(_) => {
+                                eprintln!("Table truncated: {}", tbl_name_log);
+                                // 清空表不需要刷新树，因为表结构没变
+                            }
+                            Err(e) => eprintln!("Failed to truncate table: {}", e),
+                        }
+                    }).detach();
+                    true
+                })
+        });
+    }
+
+    /// 处理删除视图事件
+    fn handle_delete_view(
+        node: DbNode,
+        global_state: GlobalDbState,
+        tree_view: Entity<DbTreeView>,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let connection_id = node.connection_id.clone();
+        let view_name = node.name.clone();
+        let metadata = node.metadata.clone();
+
+        window.open_dialog(cx, move |dialog, _window, _cx| {
+            let conn_id = connection_id.clone();
+            let v_name = view_name.clone();
+            let meta = metadata.clone();
+            let state = global_state.clone();
+            let v_name_display = view_name.clone();
+            let tree = tree_view.clone();
+            
+            dialog
+                .title("确认删除")
+                .confirm()
+                .child(
+                    v_flex()
+                        .gap_2()
+                        .child(format!("确定要删除视图 \"{}\" 吗？", v_name_display))
+                        .child("此操作不可恢复。")
+                )
+                .on_ok(move |_, _, cx| {
+                    let conn_id = conn_id.clone();
+                    let v_name = v_name.clone();
+                    let meta = meta.clone();
+                    let state = state.clone();
+                    let v_name_log = v_name.clone();
+                    let tree = tree.clone();
+                    let db_node_id = format!("{}:{}", conn_id, meta.as_ref().and_then(|m| m.get("database")).unwrap_or(&String::new()));
+                    
+                    cx.spawn(async move |cx| {
+                        let result = db::spawn_result(async move {
+                            let (plugin, conn_arc) = state.get_plugin_and_connection(&conn_id).await?;
+                            let conn = conn_arc.read().await;
+                            let database = meta.as_ref().and_then(|m| m.get("database")).map(|s| s.as_str()).unwrap_or("");
+                            plugin.drop_view(&**conn, database, &v_name).await
+                        }).await;
+
+                        match result {
+                            Ok(_) => {
+                                eprintln!("View deleted: {}", v_name_log);
+                                // 刷新数据库节点
+                                let _ = cx.update(|cx| {
+                                    tree.update(cx, |tree, cx| {
+                                        tree.refresh_tree(db_node_id, cx);
+                                    });
+                                });
+                            }
+                            Err(e) => eprintln!("Failed to delete view: {}", e),
+                        }
+                    }).detach();
+                    true
+                })
+        });
+    }
 }
 
 // Database connection tab content - using TabContainer architecture
@@ -398,10 +990,15 @@ pub struct DatabaseTabContent {
     status_msg: Entity<String>,
     is_connected: Entity<bool>,
     event_handler: Option<Entity<DatabaseEventHandler>>,
+    tab_name: Option< String>
 }
 
 impl DatabaseTabContent {
-    pub fn new(connections: Vec<StoredConnection>, window: &mut Window, cx: &mut App) -> Self {
+
+    pub fn new( connections: Vec<StoredConnection>, window: &mut Window, cx: &mut App) -> Self {
+        Self::new_with_name(None, connections, window, cx)
+    }
+    pub fn new_with_name(tab_name: Option<String>, connections: Vec<StoredConnection>, window: &mut Window, cx: &mut App) -> Self {
         // Create database tree view
         let db_tree_view = cx.new(|cx| {
             DbTreeView::new(&connections, window, cx)
@@ -454,6 +1051,7 @@ impl DatabaseTabContent {
             status_msg,
             is_connected,
             event_handler: Some(event_handler),
+            tab_name
         }
     }
 
@@ -642,10 +1240,15 @@ impl DatabaseTabContent {
 
 impl TabContent for DatabaseTabContent {
     fn title(&self) -> SharedString {
-        self.connections.first()
-            .map(|c| c.name.clone())
-            .unwrap_or_else(|| "Database".to_string())
-            .into()
+        if let Some(name) = self.tab_name.clone() {
+            name.into()
+        }else {
+            self.connections.first()
+                .map(|c| c.name.clone())
+                .unwrap_or_else(|| "Database".to_string())
+                .into()
+        }
+
     }
 
     fn icon(&self) -> Option<IconName> {
@@ -706,6 +1309,7 @@ impl Clone for DatabaseTabContent {
             status_msg: self.status_msg.clone(),
             is_connected: self.is_connected.clone(),
             event_handler: self.event_handler.clone(),
+            tab_name: self.tab_name.clone(),
         }
     }
 }

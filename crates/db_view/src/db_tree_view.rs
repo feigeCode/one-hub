@@ -33,6 +33,26 @@ pub enum DbTreeViewEvent {
     ImportData { node: DbNode },
     /// 导出数据
     ExportData { node: DbNode },
+    /// 关闭连接
+    CloseConnection { node: DbNode },
+    /// 编辑连接
+    EditConnection { node: DbNode },
+    /// 删除连接
+    DeleteConnection { node: DbNode },
+    /// 编辑数据库
+    EditDatabase { node: DbNode },
+    /// 关闭数据库
+    CloseDatabase { node: DbNode },
+    /// 删除数据库
+    DeleteDatabase { node: DbNode },
+    /// 删除表
+    DeleteTable { node: DbNode },
+    /// 重命名表
+    RenameTable { node: DbNode },
+    /// 清空表
+    TruncateTable { node: DbNode },
+    /// 删除视图
+    DeleteView { node: DbNode },
 }
 
 // ============================================================================
@@ -593,14 +613,50 @@ impl Render for DbTreeView {
                                                             
                                                             // 根据节点类型添加不同的菜单项
                                                             match node.node_type {
-                                                                DbNodeType::Database => {
+                                                                DbNodeType::Connection => {
                                                                     let node1 = node.clone();
                                                                     let node2 = node.clone();
                                                                     let node3 = node.clone();
                                                                     
                                                                     menu = menu
                                                                         .item(
-                                                                            PopupMenuItem::new("New Query")
+                                                                            PopupMenuItem::new("关闭连接")
+                                                                                .on_click(window.listener_for(&view_clone, move |_this, _, _, cx| {
+                                                                                    cx.emit(DbTreeViewEvent::CloseConnection {
+                                                                                        node: node1.clone()
+                                                                                    });
+                                                                                }))
+                                                                        )
+                                                                        .item(
+                                                                            PopupMenuItem::new("编辑连接")
+                                                                                .on_click(window.listener_for(&view_clone, move |_this, _, _, cx| {
+                                                                                    cx.emit(DbTreeViewEvent::EditConnection {
+                                                                                        node: node2.clone()
+                                                                                    });
+                                                                                }))
+                                                                        )
+                                                                        .separator()
+                                                                        .item(
+                                                                            PopupMenuItem::new("删除连接")
+                                                                                .on_click(window.listener_for(&view_clone, move |_this, _, _, cx| {
+                                                                                    cx.emit(DbTreeViewEvent::DeleteConnection {
+                                                                                        node: node3.clone()
+                                                                                    });
+                                                                                }))
+                                                                        )
+                                                                        .separator();
+                                                                }
+                                                                DbNodeType::Database => {
+                                                                    let node1 = node.clone();
+                                                                    let node2 = node.clone();
+                                                                    let node3 = node.clone();
+                                                                    let node4 = node.clone();
+                                                                    let node5 = node.clone();
+                                                                    let node6 = node.clone();
+                                                                    
+                                                                    menu = menu
+                                                                        .item(
+                                                                            PopupMenuItem::new("新建查询")
                                                                                 .on_click(window.listener_for(&view_clone, move |_this, _, _, cx| {
                                                                                     cx.emit(DbTreeViewEvent::CreateNewQuery {
                                                                                         node: node1.clone()
@@ -609,18 +665,43 @@ impl Render for DbTreeView {
                                                                         )
                                                                         .separator()
                                                                         .item(
-                                                                            PopupMenuItem::new("Import Data")
+                                                                            PopupMenuItem::new("编辑数据库")
                                                                                 .on_click(window.listener_for(&view_clone, move |_this, _, _, cx| {
-                                                                                    cx.emit(DbTreeViewEvent::ImportData {
+                                                                                    cx.emit(DbTreeViewEvent::EditDatabase {
                                                                                         node: node2.clone()
                                                                                     });
                                                                                 }))
                                                                         )
                                                                         .item(
-                                                                            PopupMenuItem::new("Export Database")
+                                                                            PopupMenuItem::new("关闭数据库")
+                                                                                .on_click(window.listener_for(&view_clone, move |_this, _, _, cx| {
+                                                                                    cx.emit(DbTreeViewEvent::CloseDatabase {
+                                                                                        node: node3.clone()
+                                                                                    });
+                                                                                }))
+                                                                        )
+                                                                        .item(
+                                                                            PopupMenuItem::new("删除数据库")
+                                                                                .on_click(window.listener_for(&view_clone, move |_this, _, _, cx| {
+                                                                                    cx.emit(DbTreeViewEvent::DeleteDatabase {
+                                                                                        node: node4.clone()
+                                                                                    });
+                                                                                }))
+                                                                        )
+                                                                        .separator()
+                                                                        .item(
+                                                                            PopupMenuItem::new("导入数据")
+                                                                                .on_click(window.listener_for(&view_clone, move |_this, _, _, cx| {
+                                                                                    cx.emit(DbTreeViewEvent::ImportData {
+                                                                                        node: node5.clone()
+                                                                                    });
+                                                                                }))
+                                                                        )
+                                                                        .item(
+                                                                            PopupMenuItem::new("导出数据库")
                                                                                 .on_click(window.listener_for(&view_clone, move |_this, _, _, cx| {
                                                                                     cx.emit(DbTreeViewEvent::ExportData {
-                                                                                        node: node3.clone()
+                                                                                        node: node6.clone()
                                                                                     });
                                                                                 }))
                                                                         )
@@ -630,31 +711,82 @@ impl Render for DbTreeView {
                                                                     let node1 = node.clone();
                                                                     let node2 = node.clone();
                                                                     let node3 = node.clone();
+                                                                    let node4 = node.clone();
+                                                                    let node5 = node.clone();
+                                                                    let node6 = node.clone();
                                                                     
                                                                     menu = menu
-                                                                        .item(PopupMenuItem::new("View Table Data"))
                                                                         .item(
-                                                                            PopupMenuItem::new("Edit Table")
+                                                                            PopupMenuItem::new("查看表数据")
+                                                                                .on_click(window.listener_for(&view_clone, move |_this, _, _, cx| {
+                                                                                    cx.emit(DbTreeViewEvent::OpenTableData {
+                                                                                        node: node1.clone()
+                                                                                    });
+                                                                                }))
+                                                                        )
+                                                                        .item(
+                                                                            PopupMenuItem::new("编辑表结构")
                                                                             .on_click(window.listener_for(&view_clone, move |_this, _, _, cx| {
                                                                                 cx.emit(DbTreeViewEvent::OpenTableStructure {
-                                                                                    node: node1.clone()
+                                                                                    node: node2.clone()
                                                                                 });
                                                                             }))
                                                                         )
                                                                         .separator()
                                                                         .item(
-                                                                            PopupMenuItem::new("Import to Table")
+                                                                            PopupMenuItem::new("重命名表")
                                                                                 .on_click(window.listener_for(&view_clone, move |_this, _, _, cx| {
-                                                                                    cx.emit(DbTreeViewEvent::ImportData {
-                                                                                        node: node2.clone()
+                                                                                    cx.emit(DbTreeViewEvent::RenameTable {
+                                                                                        node: node3.clone()
                                                                                     });
                                                                                 }))
                                                                         )
                                                                         .item(
-                                                                            PopupMenuItem::new("Export Table")
+                                                                            PopupMenuItem::new("清空表")
+                                                                                .on_click(window.listener_for(&view_clone, move |_this, _, _, cx| {
+                                                                                    cx.emit(DbTreeViewEvent::TruncateTable {
+                                                                                        node: node4.clone()
+                                                                                    });
+                                                                                }))
+                                                                        )
+                                                                        .item(
+                                                                            PopupMenuItem::new("删除表")
+                                                                                .on_click(window.listener_for(&view_clone, move |_this, _, _, cx| {
+                                                                                    cx.emit(DbTreeViewEvent::DeleteTable {
+                                                                                        node: node5.clone()
+                                                                                    });
+                                                                                }))
+                                                                        )
+                                                                        .separator()
+                                                                        .item(
+                                                                            PopupMenuItem::new("导出表")
                                                                                 .on_click(window.listener_for(&view_clone, move |_this, _, _, cx| {
                                                                                     cx.emit(DbTreeViewEvent::ExportData {
-                                                                                        node: node3.clone()
+                                                                                        node: node6.clone()
+                                                                                    });
+                                                                                }))
+                                                                        )
+                                                                        .separator();
+                                                                }
+                                                                DbNodeType::View => {
+                                                                    let node1 = node.clone();
+                                                                    let node2 = node.clone();
+                                                                    
+                                                                    menu = menu
+                                                                        .item(
+                                                                            PopupMenuItem::new("查看视图数据")
+                                                                                .on_click(window.listener_for(&view_clone, move |_this, _, _, cx| {
+                                                                                    cx.emit(DbTreeViewEvent::OpenViewData {
+                                                                                        node: node1.clone()
+                                                                                    });
+                                                                                }))
+                                                                        )
+                                                                        .separator()
+                                                                        .item(
+                                                                            PopupMenuItem::new("删除视图")
+                                                                                .on_click(window.listener_for(&view_clone, move |_this, _, _, cx| {
+                                                                                    cx.emit(DbTreeViewEvent::DeleteView {
+                                                                                        node: node2.clone()
                                                                                     });
                                                                                 }))
                                                                         )

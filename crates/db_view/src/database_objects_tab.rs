@@ -92,7 +92,11 @@ impl DatabaseObjectsPanel {
                     plugin.list_databases_view(&**conn).await.ok()
                 },
                 db::types::DbNodeType::Database | db::types::DbNodeType::TablesFolder => {
-                    plugin.list_tables_view(&**conn, &node.name).await.ok()
+                    let mut database = &node.name;
+                    if node.metadata.is_some() {
+                        database = node.metadata.as_ref()?.get("database").or(Some(&node.name))?;
+                    }
+                    plugin.list_tables_view(&**conn, database).await.ok()
                 }
                 db::types::DbNodeType::Table => {
                     let database = node.metadata.as_ref()?.get("database")?;

@@ -683,7 +683,7 @@ impl HomePage {
             })
     }
 
-    fn open_workspace_tab(&mut self, workspace_id: i64, window: &mut Window, cx: &mut Context<Self>) {
+    fn open_workspace_tab(&mut self, workspace_id: i64, name: String, window: &mut Window, cx: &mut Context<Self>) {
         let connections: Vec<StoredConnection> = self.connections.iter()
             .cloned()
             .filter(|conn| conn.workspace_id == Some(workspace_id))
@@ -694,7 +694,8 @@ impl HomePage {
                 tab_id.clone(),
                 {
                     move |window, cx| {
-                        let ws_content = DatabaseTabContent::new(
+                        let ws_content = DatabaseTabContent::new_with_name(
+                            Some(name),
                             connections,
                             window,
                             cx
@@ -720,7 +721,7 @@ impl HomePage {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let workspace_id = workspace.id;
-        
+        let workspace_name = workspace.name.clone();
         v_flex()
             .gap_3()
             .child(
@@ -735,7 +736,7 @@ impl HomePage {
                     .hover(|style| style.bg(accent_color.opacity(0.1)))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         if let Some(ws_id) = workspace_id {
-                            this.open_workspace_tab(ws_id, window, cx);
+                            this.open_workspace_tab(ws_id, workspace_name.clone(), window, cx);
                         }
                     }))
                     .child(
