@@ -529,16 +529,17 @@ impl TabContainer {
     pub fn render_tab_bar(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let view = cx.entity();
 
-        // 使用自定义颜色或默认深色标签栏
-        let bg_color = self.tab_bar_bg_color.unwrap_or_else(|| gpui::rgb(0x2b2b2b).into());
-        let border_color = self.tab_bar_border_color.unwrap_or_else(|| gpui::rgb(0x1e1e1e).into());
-        let active_tab_color = self.active_tab_bg_color.unwrap_or_else(|| gpui::rgb(0x555555).into());
-        let hover_tab_color = self.inactive_tab_hover_color.unwrap_or_else(|| gpui::rgb(0x3a3a3a).into());
-        let inactive_tab_color = self.inactive_tab_bg_color.unwrap_or_else(|| gpui::rgb(0xffffff).into());
-        let text_color = self.tab_text_color.unwrap_or_else(|| gpui::white().into());
-        let close_btn_color = self.tab_close_button_color.unwrap_or_else(|| gpui::rgb(0xaaaaaa).into());
-        let drag_border_color = cx.theme().drag_border;
-        let icon_color = self.tab_icon_color.unwrap_or_else(|| gpui::rgb(0xaaaaaa).into());
+        // 使用自定义颜色或从主题动态读取
+        let theme = cx.theme();
+        let bg_color = self.tab_bar_bg_color.unwrap_or(theme.tab);
+        let border_color = self.tab_bar_border_color.unwrap_or(theme.border);
+        let active_tab_color = self.active_tab_bg_color.unwrap_or(theme.tab_active);
+        let hover_tab_color = self.inactive_tab_hover_color.unwrap_or(theme.tab.opacity(0.8));
+        let inactive_tab_color = self.inactive_tab_bg_color.unwrap_or(theme.tab.opacity(0.5));
+        let text_color = self.tab_text_color.unwrap_or(theme.tab_foreground);
+        let close_btn_color = self.tab_close_button_color.unwrap_or(theme.muted_foreground);
+        let drag_border_color = theme.drag_border;
+        let icon_color = self.tab_icon_color.unwrap_or(theme.tab_foreground);
         let active_index = self.active_index;
 
         h_flex()
