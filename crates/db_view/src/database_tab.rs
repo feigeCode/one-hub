@@ -400,8 +400,9 @@ impl DatabaseTabContent {
         cx.spawn(async move |_cx| {
             // 先注册所有连接
             for conn in &connections_clone {
-                let db_config = conn.to_db_connection();
-                let _ = global_state.register_connection(db_config).await;
+                if let Ok(db_config) = conn.to_db_connection() {
+                    let _ = global_state.register_connection(db_config).await;
+                }
             }
         }).detach();
 
@@ -423,10 +424,10 @@ impl DatabaseTabContent {
         // 获取第一个连接信息用于显示
         let first_conn = self.connections.first();
         let conn_name = first_conn.map(|c| c.name.clone()).unwrap_or_else(|| "Unknown".to_string());
-        let conn_host = first_conn.map(|c| c.host.clone()).unwrap_or_default();
-        let conn_port = first_conn.map(|c| c.port).unwrap_or(0);
-        let conn_username = first_conn.map(|c| c.username.clone()).unwrap_or_default();
-        let conn_database = first_conn.and_then(|c| c.database.clone());
+        let (conn_host, conn_port, conn_username, conn_database) = first_conn
+            .and_then(|c| c.to_database_params().ok())
+            .map(|p| (p.host, p.port, p.username, p.database))
+            .unwrap_or_default();
 
         v_flex()
             .size_full()
@@ -578,21 +579,21 @@ impl DatabaseTabContent {
                             // 获取当前选中的数据库
                             let current_db = db_tree_view.read(cx).get_selected_database();
                             let database = current_db.unwrap_or_else(|| "default".to_string());
-                            let config = conn.to_db_connection();
+                            if let Ok(config) = conn.to_db_connection() {
+                                let tab_id = format!("new-table-{}", Uuid::new_v4());
 
-                            let tab_id = format!("new-table-{}", Uuid::new_v4());
-
-                            tab_container.update(cx, |container, cx| {
-                                let table_designer = TableDesignerView::new_table(
-                                    database,
-                                    config.id,
-                                    config.database_type,
-                                    window,
-                                    cx,
-                                );
-                                let tab = TabItem::new(tab_id, table_designer.read(cx).clone());
-                                container.add_and_activate_tab(tab, cx);
-                            });
+                                tab_container.update(cx, |container, cx| {
+                                    let table_designer = TableDesignerView::new_table(
+                                        database,
+                                        config.id,
+                                        config.database_type,
+                                        window,
+                                        cx,
+                                    );
+                                    let tab = TabItem::new(tab_id, table_designer.read(cx).clone());
+                                    container.add_and_activate_tab(tab, cx);
+                                });
+                            }
                         }
                     })
             )

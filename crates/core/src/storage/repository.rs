@@ -29,13 +29,8 @@ impl Repository for ConnectionRepository {
             CREATE TABLE IF NOT EXISTS connections (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL UNIQUE,
-                db_type TEXT NOT NULL,
                 connection_type TEXT NOT NULL,
-                host TEXT NOT NULL,
-                port INTEGER NOT NULL,
-                username TEXT NOT NULL,
-                password TEXT NOT NULL,
-                database TEXT,
+                params TEXT NOT NULL,
                 workspace_id INTEGER,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
@@ -60,18 +55,13 @@ impl Repository for ConnectionRepository {
         let now = now();
         let result = sqlx::query(
             r#"
-            INSERT INTO connections (name, db_type, connection_type, host, port, username, password, database, workspace_id, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO connections (name, connection_type, params, workspace_id, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&item.name)
-        .bind(format!("{:?}", item.db_type))
         .bind(format!("{:?}", item.connection_type))
-        .bind(&item.host)
-        .bind(item.port as i64)
-        .bind(&item.username)
-        .bind(&item.password)
-        .bind(&item.database)
+        .bind(&item.params)
         .bind(item.workspace_id)
         .bind(now)
         .bind(now)
@@ -92,19 +82,13 @@ impl Repository for ConnectionRepository {
         sqlx::query(
             r#"
             UPDATE connections 
-            SET name = ?, db_type = ?, connection_type = ?, host = ?, port = ?, 
-                username = ?, password = ?, database = ?, workspace_id = ?, updated_at = ?
+            SET name = ?, connection_type = ?, params = ?, workspace_id = ?, updated_at = ?
             WHERE id = ?
             "#,
         )
         .bind(&item.name)
-        .bind(format!("{:?}", item.db_type))
         .bind(format!("{:?}", item.connection_type))
-        .bind(&item.host)
-        .bind(item.port as i64)
-        .bind(&item.username)
-        .bind(&item.password)
-        .bind(&item.database)
+        .bind(&item.params)
         .bind(item.workspace_id)
         .bind(now)
         .bind(id)
@@ -126,7 +110,7 @@ impl Repository for ConnectionRepository {
     async fn get(&self, pool: &SqlitePool, id: i64) -> Result<Option<Self::Entity>> {
         let row = sqlx::query(
             r#"
-            SELECT id, name, db_type, connection_type, host, port, username, password, database, workspace_id, created_at, updated_at
+            SELECT id, name, connection_type, params, workspace_id, created_at, updated_at
             FROM connections
             WHERE id = ?
             "#,
@@ -141,7 +125,7 @@ impl Repository for ConnectionRepository {
     async fn list(&self, pool: &SqlitePool) -> Result<Vec<Self::Entity>> {
         let rows = sqlx::query(
             r#"
-            SELECT id, name, db_type, connection_type, host, port, username, password, database, workspace_id, created_at, updated_at
+            SELECT id, name, connection_type, params, workspace_id, created_at, updated_at
             FROM connections
             ORDER BY updated_at DESC
             "#,
@@ -172,21 +156,13 @@ impl Repository for ConnectionRepository {
 
 impl ConnectionRepository {
     fn row_to_entity(row: &sqlx::sqlite::SqliteRow) -> StoredConnection {
-        use crate::storage::models::parse_db_type;
-
-        let db_type_str: String = row.get("db_type");
         let conn_type_str: String = row.get("connection_type");
 
         StoredConnection {
             id: Some(row.get("id")),
             name: row.get("name"),
-            db_type: parse_db_type(&db_type_str),
             connection_type: parse_connection_type(&conn_type_str),
-            host: row.get("host"),
-            port: row.get::<i64, _>("port") as u16,
-            username: row.get("username"),
-            password: row.get("password"),
-            database: row.get("database"),
+            params: row.get("params"),
             workspace_id: row.get("workspace_id"),
             created_at: Some(row.get("created_at")),
             updated_at: Some(row.get("updated_at")),
@@ -196,7 +172,7 @@ impl ConnectionRepository {
     pub async fn list_by_workspace(&self, pool: &SqlitePool, workspace_id: Option<i64>) -> Result<Vec<StoredConnection>> {
         let rows = sqlx::query(
             r#"
-            SELECT id, name, db_type, connection_type, host, port, username, password, database, workspace_id, created_at, updated_at
+            SELECT id, name, connection_type, params, workspace_id, created_at, updated_at
             FROM connections
             WHERE workspace_id IS ? OR (? IS NULL AND workspace_id IS NULL)
             ORDER BY updated_at DESC

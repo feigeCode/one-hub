@@ -36,6 +36,44 @@ impl DatabaseType {
     }
 }
 
+/// Connection parameters for different connection types
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DatabaseParams {
+    pub db_type: DatabaseType,
+    pub host: String,
+    pub port: u16,
+    pub username: String,
+    pub password: String,
+    pub database: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SshParams {
+    pub host: String,
+    pub port: u16,
+    pub username: String,
+    pub auth_method: SshAuthMethod,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum SshAuthMethod {
+    Password { password: String },
+    PrivateKey { key_path: String, passphrase: Option<String> },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RedisParams {
+    pub host: String,
+    pub port: u16,
+    pub password: Option<String>,
+    pub db_index: u8,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MongoDBParams {
+    pub connection_string: String,
+}
+
 
 /// Connection configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -117,19 +155,14 @@ impl Workspace {
     }
 }
 
-/// Stored database connection with ID
+/// Stored connection with ID
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoredConnection {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<i64>,
     pub name: String,
-    pub db_type: DatabaseType,
     pub connection_type: ConnectionType,
-    pub host: String,
-    pub port: u16,
-    pub username: String,
-    pub password: String,
-    pub database: Option<String>,
+    pub params: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workspace_id: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -153,35 +186,95 @@ impl Entity for StoredConnection {
 }
 
 impl StoredConnection {
-    pub fn new(db_type: DatabaseType, connection: DbConnectionConfig) -> Self {
+    pub fn new_database(name: String, params: DatabaseParams, workspace_id: Option<i64>) -> Self {
         Self {
             id: None,
-            name: connection.name,
-            db_type,
+            name,
             connection_type: ConnectionType::Database,
-            host: connection.host,
-            port: connection.port,
-            username: connection.username,
-            password: connection.password,
-            database: connection.database,
-            workspace_id: None,
+            params: serde_json::to_string(&params).unwrap(),
+            workspace_id,
             created_at: None,
             updated_at: None,
         }
     }
 
-    pub fn to_db_connection(&self) -> DbConnectionConfig {
-        DbConnectionConfig {
-            id: self.id.unwrap().to_string(),
-            database_type: self.db_type,
-            name: self.name.clone(),
-            host: self.host.clone(),
-            port: self.port,
-            username: self.username.clone(),
-            password: self.password.clone(),
-            database: self.database.clone(),
-            workspace_id: self.workspace_id,
+    pub fn new_ssh(name: String, params: SshParams, workspace_id: Option<i64>) -> Self {
+        Self {
+            id: None,
+            name,
+            connection_type: ConnectionType::SshSftp,
+            params: serde_json::to_string(&params).unwrap(),
+            workspace_id,
+            created_at: None,
+            updated_at: None,
         }
+    }
+
+    pub fn new_redis(name: String, params: RedisParams, workspace_id: Option<i64>) -> Self {
+        Self {
+            id: None,
+            name,
+            connection_type: ConnectionType::Redis,
+            params: serde_json::to_string(&params).unwrap(),
+            workspace_id,
+            created_at: None,
+            updated_at: None,
+        }
+    }
+
+    pub fn new_mongodb(name: String, params: MongoDBParams, workspace_id: Option<i64>) -> Self {
+        Self {
+            id: None,
+            name,
+            connection_type: ConnectionType::MongoDB,
+            params: serde_json::to_string(&params).unwrap(),
+            workspace_id,
+            created_at: None,
+            updated_at: None,
+        }
+    }
+
+    pub fn to_database_params(&self) -> Result<DatabaseParams, serde_json::Error> {
+        serde_json::from_str(&self.params)
+    }
+
+    pub fn to_ssh_params(&self) -> Result<SshParams, serde_json::Error> {
+        serde_json::from_str(&self.params)
+    }
+
+    pub fn to_redis_params(&self) -> Result<RedisParams, serde_json::Error> {
+        serde_json::from_str(&self.params)
+    }
+
+    pub fn to_mongodb_params(&self) -> Result<MongoDBParams, serde_json::Error> {
+        serde_json::from_str(&self.params)
+    }
+
+    pub fn to_db_connection(&self) -> Result<DbConnectionConfig, serde_json::Error> {
+        let params: DatabaseParams = self.to_database_params()?;
+        Ok(DbConnectionConfig {
+            id: self.id.unwrap().to_string(),
+            database_type: params.db_type,
+            name: self.name.clone(),
+            host: params.host,
+            port: params.port,
+            username: params.username,
+            password: params.password,
+            database: params.database,
+            workspace_id: self.workspace_id,
+        })
+    }
+
+    pub fn from_db_connection(connection: DbConnectionConfig) -> Self {
+        let params = DatabaseParams {
+            db_type: connection.database_type,
+            host: connection.host,
+            port: connection.port,
+            username: connection.username,
+            password: connection.password,
+            database: connection.database,
+        };
+        Self::new_database(connection.name, params, connection.workspace_id)
     }
 }
 

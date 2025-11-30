@@ -358,19 +358,26 @@ impl HomePage {
         cx: &mut Context<Self>,
     ) {
         let editing_id = self.editing_connection_id;
-        let mut stored = StoredConnection {
-            id: editing_id,
-            name: config.name.clone(),
-            db_type: config.database_type.clone(),
-            connection_type: ConnectionType::Database,
-            host: config.host.clone(),
-            port: config.port,
-            username: config.username.clone(),
-            password: config.password.clone(),
-            database: config.database.clone(),
-            workspace_id: config.workspace_id,
-            created_at: None,
-            updated_at: None,
+        let mut stored = if let Some(id) = editing_id {
+            // 编辑模式：从现有连接更新
+            let mut conn = self.connections.iter()
+                .find(|c| c.id == Some(id))
+                .cloned()
+                .unwrap_or_else(|| StoredConnection::from_db_connection(config.clone()));
+            conn.name = config.name.clone();
+            conn.workspace_id = config.workspace_id;
+            conn.params = serde_json::to_string(&one_core::storage::DatabaseParams {
+                db_type: config.database_type,
+                host: config.host.clone(),
+                port: config.port,
+                username: config.username.clone(),
+                password: config.password.clone(),
+                database: config.database.clone(),
+            }).unwrap();
+            conn
+        } else {
+            // 新建模式
+            StoredConnection::from_db_connection(config.clone())
         };
 
         let storage = cx.global::<GlobalStorageState>().storage.clone();
@@ -496,7 +503,9 @@ impl HomePage {
                                     if let Some(conn_id) = this.selected_connection_id {
                                         if let Some(conn) = this.connections.iter().find(|c| c.id == Some(conn_id)) {
                                             this.editing_connection_id = Some(conn_id);
-                                            this.show_connection_form(conn.db_type, window, cx);
+                                            if let Ok(params) = conn.to_database_params() {
+                                                this.show_connection_form(params.db_type, window, cx);
+                                            }
                                         }
                                     }
                                 }))
@@ -602,10 +611,16 @@ impl HomePage {
                         if search_query.is_empty() {
                             return true;
                         }
-                        conn.name.to_lowercase().contains(&search_query)
-                            || conn.host.to_lowercase().contains(&search_query)
-                            || conn.username.to_lowercase().contains(&search_query)
-                            || conn.database.as_ref().map_or(false, |db| db.to_lowercase().contains(&search_query))
+                        if conn.name.to_lowercase().contains(&search_query) {
+                            return true;
+                        }
+                        if let Ok(params) = conn.to_database_params() {
+                            params.host.to_lowercase().contains(&search_query)
+                                || params.username.to_lowercase().contains(&search_query)
+                                || params.database.as_ref().map_or(false, |db| db.to_lowercase().contains(&search_query))
+                        } else {
+                            false
+                        }
                     })
                     .cloned()
                     .collect();
@@ -619,10 +634,16 @@ impl HomePage {
                 if search_query.is_empty() {
                     return true;
                 }
-                conn.name.to_lowercase().contains(&search_query)
-                    || conn.host.to_lowercase().contains(&search_query)
-                    || conn.username.to_lowercase().contains(&search_query)
-                    || conn.database.as_ref().map_or(false, |db| db.to_lowercase().contains(&search_query))
+                if conn.name.to_lowercase().contains(&search_query) {
+                    return true;
+                }
+                if let Ok(params) = conn.to_database_params() {
+                    params.host.to_lowercase().contains(&search_query)
+                        || params.username.to_lowercase().contains(&search_query)
+                        || params.database.as_ref().map_or(false, |db| db.to_lowercase().contains(&search_query))
+                } else {
+                    false
+                }
             })
             .cloned()
             .collect();
@@ -895,19 +916,21 @@ impl HomePage {
                                         .text_color(cx.theme().foreground)
                                         .child(conn.name.clone())
                                 )
-                                .child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .child(format!("{}@{}:{}", conn.username, conn.host, conn.port))
-                                )
-                                .when_some(conn.database.as_ref(), |this, db| {
+                                .when_some(conn.to_database_params().ok(), |this, params| {
                                     this.child(
                                         div()
                                             .text_xs()
                                             .text_color(cx.theme().muted_foreground)
-                                            .child(format!("数据库: {}", db))
+                                            .child(format!("{}@{}:{}", params.username, params.host, params.port))
                                     )
+                                    .when_some(params.database, |this, db| {
+                                        this.child(
+                                            div()
+                                                .text_xs()
+                                                .text_color(cx.theme().muted_foreground)
+                                                .child(format!("数据库: {}", db))
+                                        )
+                                    })
                                 })
                         )
                 )

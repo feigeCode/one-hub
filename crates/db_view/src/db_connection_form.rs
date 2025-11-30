@@ -259,13 +259,18 @@ impl DbConnectionForm {
     pub fn load_connection(&mut self, connection: &StoredConnection, window: &mut Window, cx: &mut Context<Self>) {
         // Update form values from connection
         self.set_field_value("name", &connection.name, window, cx);
-        self.set_field_value("host", &connection.host, window, cx);
-        self.set_field_value("port", &connection.port.to_string(), window, cx);
-        self.set_field_value("username", &connection.username, window, cx);
-        self.set_field_value("password", &connection.password, window, cx);
-        if let Some(db) = &connection.database {
-            self.set_field_value("database", db, window, cx);
+        
+        // Parse database params
+        if let Ok(params) = connection.to_database_params() {
+            self.set_field_value("host", &params.host, window, cx);
+            self.set_field_value("port", &params.port.to_string(), window, cx);
+            self.set_field_value("username", &params.username, window, cx);
+            self.set_field_value("password", &params.password, window, cx);
+            if let Some(db) = &params.database {
+                self.set_field_value("database", db, window, cx);
+            }
         }
+        
         self.selected_workspace_id.update(cx, |ws_id, cx| {
             *ws_id = connection.workspace_id;
             cx.notify();
