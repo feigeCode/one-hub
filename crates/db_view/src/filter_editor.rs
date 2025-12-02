@@ -1,10 +1,10 @@
 use std::rc::Rc;
 
 use anyhow::Result;
-use gpui::{App, AppContext, Context, Entity, IntoElement, Render, Styled as _, Task, Window};
+use gpui::{App, AppContext, Context, Div, Entity, IntoElement, ParentElement, Render, Styled as _, Task, Window};
 use gpui_component::highlighter::Language;
-use gpui_component::input::{CompletionProvider, Input, InputState, TabSize};
-use gpui_component::{Rope, RopeExt};
+use gpui_component::input::{CompletionProvider, Input, InputState};
+use gpui_component::{ActiveTheme, Rope, RopeExt};
 use lsp_types::{
     CompletionContext, CompletionItem, CompletionItemKind, CompletionResponse, CompletionTextEdit,
     Documentation, InsertReplaceEdit, Range,
@@ -540,31 +540,17 @@ impl CompletionProvider for OrderByCompletionProvider {
     }
 }
 
-// WHERE clause editor - single line input with auto-completion
-pub struct WhereEditor {
+pub struct SimpleCodeEditor {
     editor: Entity<InputState>,
 }
 
-impl WhereEditor {
-    pub fn new(table_schema: TableSchema, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let editor = cx.new(|cx| {
-            let mut editor = InputState::new(window, cx)
-                .code_editor(Language::from_str("sql"))
-                .line_number(false)
-                .searchable(false)
-                .indent_guides(false)
-                .soft_wrap(false)
-                .placeholder("Enter WHERE clause conditions (e.g., name = 'John' AND status = 'active')...");
+impl SimpleCodeEditor {
 
-            // Set WHERE completion provider
-            editor.lsp.completion_provider = Some(Rc::new(WhereCompletionProvider::new(table_schema)));
-
-            editor
-        });
-
-        Self { editor }
+    pub fn new(editor: Entity<InputState>) -> Self {
+        Self {
+            editor,
+        }
     }
-
     pub fn input(&self) -> Entity<InputState> {
         self.editor.clone()
     }
@@ -582,120 +568,50 @@ impl WhereEditor {
     }
 }
 
-impl Render for WhereEditor {
+impl Render for SimpleCodeEditor {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         Input::new(&self.editor).size_full()
     }
 }
 
-// ORDER BY editor - single line input with auto-completion
-pub struct OrderByEditor {
-    editor: Entity<InputState>,
-}
 
-impl OrderByEditor {
-    pub fn new(table_schema: TableSchema, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let editor = cx.new(|cx| {
-            let mut editor = InputState::new(window, cx)
-                .code_editor(Language::from_str("sql"))
-                .line_number(false)
-                .searchable(false)
-                .indent_guides(false)
-                .tab_size(TabSize { tab_size: 2, hard_tabs: false })
-                .soft_wrap(false)
-                .placeholder("Enter ORDER BY clause (e.g., name ASC, created_date DESC)...");
-
-            // Set ORDER BY completion provider
-            editor.lsp.completion_provider = Some(Rc::new(OrderByCompletionProvider::new(table_schema)));
-
-            editor
-        });
-
-        Self { editor }
-    }
-
-    pub fn input(&self) -> Entity<InputState> {
-        self.editor.clone()
-    }
-
-    pub fn get_text<T>(&self, cx: &Context<T>) -> String {
-        self.editor.read(cx).text().to_string()
-    }
-
-    pub fn get_text_from_app(&self, app_cx: &App) -> String {
-        self.editor.read(app_cx).text().to_string()
-    }
-
-    pub fn set_text(&mut self, text: String, window: &mut Window, cx: &mut Context<Self>) {
-        self.editor.update(cx, |s, cx| s.set_value(text, window, cx));
-    }
-
-}
-
-impl Render for OrderByEditor {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        Input::new(&self.editor).size_full()
-    }
-}
-
-// Convenience methods to create editors with table information
-pub fn create_where_editor(
-    table_name: &str,
-    columns: Vec<(&str, &str, bool)>, // (name, data_type, is_nullable)
+pub fn create_simple_editor(
+    placeholder: &str,
     window: &mut Window,
-    cx: &mut Context<WhereEditor>,
-) -> WhereEditor {
-    let table_schema = TableSchema {
-        table_name: table_name.to_string(),
-        columns: columns
-            .into_iter()
-            .map(|(name, data_type, is_nullable)| ColumnSchema {
-                name: name.to_string(),
-                data_type: data_type.to_string(),
-                is_nullable,
-            })
-            .collect(),
-    };
+    cx: &mut Context<SimpleCodeEditor>,
+) -> SimpleCodeEditor {
 
-    WhereEditor::new(table_schema, window, cx)
-}
 
-pub fn create_order_by_editor(
-    table_name: &str,
-    columns: Vec<(&str, &str, bool)>, // (name, data_type, is_nullable)
-    window: &mut Window,
-    cx: &mut Context<OrderByEditor>,
-) -> OrderByEditor {
-    let table_schema = TableSchema {
-        table_name: table_name.to_string(),
-        columns: columns
-            .into_iter()
-            .map(|(name, data_type, is_nullable)| ColumnSchema {
-                name: name.to_string(),
-                data_type: data_type.to_string(),
-                is_nullable,
-            })
-            .collect(),
-    };
+    let editor = cx.new(|cx| {
+        let editor = InputState::new(window, cx)
+            .code_editor(Language::from_str("sql"))
+            .rows(1)
+            .line_number(false)
+            .searchable(false)
+            .indent_guides(false)
+            .soft_wrap(false)
+            .placeholder(placeholder.to_string());
 
-    OrderByEditor::new(table_schema, window, cx)
+
+        editor
+    });
+
+    SimpleCodeEditor::new(editor)
 }
 
 // A combined component for table filtering that includes both WHERE and ORDER BY editors
 pub struct TableFilterEditor {
-    where_editor: Entity<WhereEditor>,
-    order_by_editor: Entity<OrderByEditor>,
+    where_editor: Entity<SimpleCodeEditor>,
+    order_by_editor: Entity<SimpleCodeEditor>,
 }
 
 impl TableFilterEditor {
     pub fn new(
-        table_name: &str,
-        columns: Vec<(&str, &str, bool)>, // (name, data_type, is_nullable)
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let where_editor = cx.new(|cx| create_where_editor(table_name, columns.clone(), window, cx));
-        let order_by_editor = cx.new(|cx| create_order_by_editor(table_name, columns, window, cx));
+        let where_editor = cx.new(|cx| create_simple_editor("Enter WHERE clause conditions (e.g., name = 'John' AND status = 'active')...", window, cx));
+        let order_by_editor = cx.new(|cx| create_simple_editor("Enter ORDER BY clause (e.g., name ASC, created_date DESC)...", window, cx));
 
         Self {
             where_editor,
@@ -738,16 +654,34 @@ impl TableFilterEditor {
             });
         });
     }
+
+    fn label_render(&self, is_where: bool, mut label: Div, cx: &mut Context<Self>) -> Div{
+        let has_content;
+        if is_where {
+            has_content = !self.where_editor.read(cx).get_text(cx).trim().is_empty();
+        }else {
+            has_content = !self.order_by_editor.read(cx).get_text(cx).trim().is_empty();
+        }
+        if has_content {
+            label = label
+                .bg(cx.theme().accent)
+                .text_color(cx.theme().accent_foreground);
+        } else {
+            label = label.text_color(cx.theme().muted_foreground);
+        }
+
+        if is_where {
+            label.child("WHERE")
+        }else {
+            label.child("ORDER BY")
+        }
+    }
 }
 
 impl Render for TableFilterEditor {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         use gpui::{div, ParentElement, Styled};
-        use gpui_component::{h_flex, ActiveTheme};
-
-        // 检查输入框是否有内容
-        let has_where_content = !self.where_editor.read(cx).get_text(cx).trim().is_empty();
-        let has_order_by_content = !self.order_by_editor.read(cx).get_text(cx).trim().is_empty();
+        use gpui_component::h_flex;
 
         h_flex()
             .size_full()
@@ -758,22 +692,12 @@ impl Render for TableFilterEditor {
                     .items_center()
                     .gap_2()
                     .child({
-                        let mut label = div()
-                            .px_2()
+                        let label = div()
                             .py_1()
                             .rounded_md()
                             .text_sm()
                             .font_weight(gpui::FontWeight::SEMIBOLD);
-                        
-                        if has_where_content {
-                            label = label
-                                .bg(cx.theme().accent)
-                                .text_color(cx.theme().accent_foreground);
-                        } else {
-                            label = label.text_color(cx.theme().muted_foreground);
-                        }
-                        
-                        label.child("WHERE")
+                        self.label_render(true, label, cx)
                     })
                     .child(
                         div()
@@ -787,22 +711,13 @@ impl Render for TableFilterEditor {
                     .items_center()
                     .gap_2()
                     .child({
-                        let mut label = div()
-                            .px_2()
+                        let label = div()
                             .py_1()
                             .rounded_md()
                             .text_sm()
                             .font_weight(gpui::FontWeight::SEMIBOLD);
-                        
-                        if has_order_by_content {
-                            label = label
-                                .bg(cx.theme().accent)
-                                .text_color(cx.theme().accent_foreground);
-                        } else {
-                            label = label.text_color(cx.theme().muted_foreground);
-                        }
-                        
-                        label.child("ORDER BY")
+
+                        self.label_render(false, label, cx)
                     })
                     .child(
                         div()
