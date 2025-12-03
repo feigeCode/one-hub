@@ -1,7 +1,7 @@
 use std::any::Any;
 
 use anyhow::Error;
-use gpui::{div, px, AnyElement, App, AppContext, Context, ElementId, Entity, FontWeight, Hsla, InteractiveElement, IntoElement, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Window};
+use gpui::{div, img, px, AnyElement, App, AppContext, Context, ElementId, Entity, FontWeight, Hsla, InteractiveElement, IntoElement, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Window};
 use gpui::prelude::FluentBuilder;
 use gpui_component::{button::Button, h_flex, input::{Input, InputEvent, InputState}, menu::PopupMenuItem, v_flex, ActiveTheme, IconName, InteractiveElementExt, Selectable, Sizable, Size, ThemeMode};
 
@@ -274,6 +274,9 @@ impl HomePage {
         let config = match db_type {
             DatabaseType::MySQL => DbFormConfig::mysql(),
             DatabaseType::PostgreSQL => DbFormConfig::postgres(),
+            _ => {
+                panic!("Unsupported database type");
+            }
         };
 
         let form = cx.new(|cx| {
@@ -889,7 +892,6 @@ impl HomePage {
                                 .w(px(48.0))
                                 .h(px(48.0))
                                 .rounded(px(10.0))
-                                .bg(icon_bg)
                                 .flex()
                                 .items_center()
                                 .justify_center()
@@ -898,11 +900,13 @@ impl HomePage {
                                 .text_lg()
                                 .child(
                                     match conn.connection_type {
-                                        ConnectionType::Database => "DB",
-                                        ConnectionType::SshSftp => "SSH",
-                                        ConnectionType::Redis => "R",
-                                        ConnectionType::MongoDB => "M",
-                                        _ => "?",
+                                        ConnectionType::Database => {
+                                            conn.to_db_connection().unwrap().database_type.as_icon()
+                                        },
+                                        _ => {
+                                            IconName::Redis.color()
+                                        },
+
                                     }
                                 )
                         )
