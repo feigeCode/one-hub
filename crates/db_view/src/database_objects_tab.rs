@@ -4,13 +4,13 @@ use gpui::{
     div, AnyElement, App, AppContext, Context, Entity, Focusable, FocusHandle, IntoElement,
     ParentElement, SharedString, Styled, Window,
 };
+use db::{DbNode, DbNodeType, ObjectView};
 use gpui_component::{
     table::{Table, TableState},
     v_flex, ActiveTheme, Size,
 };
 
 use crate::{connection_list_panel::ConnectionListPanel, results_delegate::ResultsDelegate};
-use db::types::{DbNode, ObjectView};
 use one_core::storage::{DbConnectionConfig, StoredConnection};
 use one_core::tab_container::{TabContent, TabContentType};
 
@@ -88,37 +88,37 @@ impl DatabaseObjectsPanel {
             let conn = conn_arc.read().await;
 
             let result = match node.node_type {
-                db::types::DbNodeType::Connection => {
+                DbNodeType::Connection => {
                     plugin.list_databases_view(&**conn).await.ok()
                 },
-                db::types::DbNodeType::Database | db::types::DbNodeType::TablesFolder => {
+                DbNodeType::Database | DbNodeType::TablesFolder => {
                     let mut database = &node.name;
                     if node.metadata.is_some() {
                         database = node.metadata.as_ref()?.get("database").or(Some(&node.name))?;
                     }
                     plugin.list_tables_view(&**conn, database).await.ok()
                 }
-                db::types::DbNodeType::Table => {
+                DbNodeType::Table => {
                     let database = node.metadata.as_ref()?.get("database")?;
                     plugin.list_columns_view(&**conn, database, &node.name).await.ok()
                 }
-                db::types::DbNodeType::ViewsFolder => {
+                DbNodeType::ViewsFolder => {
                     let database = node.metadata.as_ref()?.get("database").or(Some(&node.name))?;
                     plugin.list_views_view(&**conn, database).await.ok()
                 }
-                db::types::DbNodeType::FunctionsFolder => {
+                DbNodeType::FunctionsFolder => {
                     let database = node.metadata.as_ref()?.get("database").or(Some(&node.name))?;
                     plugin.list_functions_view(&**conn, database).await.ok()
                 }
-                db::types::DbNodeType::ProceduresFolder => {
+                DbNodeType::ProceduresFolder => {
                     let database = node.metadata.as_ref()?.get("database").or(Some(&node.name))?;
                     plugin.list_procedures_view(&**conn, database).await.ok()
                 }
-                db::types::DbNodeType::TriggersFolder => {
+                DbNodeType::TriggersFolder => {
                     let database = node.metadata.as_ref()?.get("database").or(Some(&node.name))?;
                     plugin.list_triggers_view(&**conn, database).await.ok()
                 }
-                db::types::DbNodeType::SequencesFolder => {
+                DbNodeType::SequencesFolder => {
                     let database = node.metadata.as_ref()?.get("database").or(Some(&node.name))?;
                     plugin.list_sequences_view(&**conn, database).await.ok()
                 }

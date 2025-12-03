@@ -1,19 +1,15 @@
 use std::{ops::Range, rc::Rc, time::Duration};
 
 use crate::{
-    actions::{Cancel, SelectDown, SelectUp},
+    actions::{Cancel, Confirm, SelectDown, SelectUp},
     h_flex,
+    input::{Input, InputState},
     menu::{ContextMenuExt, PopupMenu},
     scroll::{ScrollableMask, Scrollbar, ScrollbarState},
-    v_flex, ActiveTheme, Icon, IconName, StyleSized as _, StyledExt, VirtualListScrollHandle,
+    v_flex, ActiveTheme, Icon, IconName, Sizable, Size, StyleSized as _, StyledExt,
+    VirtualListScrollHandle,
 };
-use gpui::{
-    canvas, div, prelude::FluentBuilder, px, uniform_list, AppContext, Axis, Bounds, ClickEvent,
-    Context, Div, DragMoveEvent, EventEmitter, FocusHandle, Focusable, InteractiveElement,
-    IntoElement, ListSizingBehavior, MouseButton, MouseDownEvent, ParentElement, Pixels, Point,
-    Render, ScrollStrategy, SharedString, StatefulInteractiveElement as _, Styled, Task,
-    UniformListScrollHandle, Window,
-};
+use gpui::{canvas, div, prelude::FluentBuilder, px, uniform_list, AppContext, Axis, Bounds, ClickEvent, Context, Div, DragMoveEvent, ElementId, Entity, EventEmitter, FocusHandle, Focusable, InteractiveElement, IntoElement, ListSizingBehavior, MouseButton, MouseDownEvent, ParentElement, Pixels, Point, Render, ScrollStrategy, SharedString, StatefulInteractiveElement as _, Styled, Task, UniformListScrollHandle, Window};
 
 use super::*;
 
@@ -21,6 +17,7 @@ use super::*;
 enum SelectionState {
     Column,
     Row,
+    Cell
 }
 
 /// The Table event.
@@ -32,6 +29,8 @@ pub enum TableEvent {
     DoubleClickedRow(usize),
     /// Selected column.
     SelectColumn(usize),
+    /// Selected cell (row_ix, col_ix).
+    SelectCell(usize, usize),
     /// The column widths have changed.
     ///
     /// The `Vec<Pixels>` contains the new widths of all columns.
@@ -41,6 +40,14 @@ pub enum TableEvent {
     /// The first `usize` is the original index of the column,
     /// and the second `usize` is the new index of the column.
     MoveColumn(usize, usize),
+    /// A cell is being edited.
+    CellEditing(usize, usize),
+    /// A cell edit was committed.
+    CellEdited(usize, usize),
+    /// A row was added.
+    RowAdded,
+    /// A row was deleted.
+    RowDeleted(usize),
 }
 
 /// The visible range of the rows and columns.
@@ -102,9 +109,16 @@ pub struct TableState<D: TableDelegate> {
     selection_state: SelectionState,
     right_clicked_row: Option<usize>,
     selected_col: Option<usize>,
-
+    /// The cell that is currently selected (row_ix, col_ix).
+    selected_cell: Option<(usize, usize)>,
     /// The column index that is being resized.
     resizing_col: Option<usize>,
+
+    /// The cell that is currently being edited (row_ix, col_ix).
+    editing_cell: Option<(usize, usize)>,
+
+    /// The input state for the cell being edited.
+    editing_input: Option<Entity<InputState>>,
 
     /// The visible range of the rows and columns.
     visible_range: TableVisibleRange,
@@ -132,7 +146,10 @@ where
             selected_row: None,
             right_clicked_row: None,
             selected_col: None,
+            selected_cell: None,
             resizing_col: None,
+            editing_cell: None,
+            editing_input: None,
             bounds: Bounds::default(),
             fixed_head_cols_bounds: Bounds::default(),
             visible_range: TableVisibleRange::default(),
@@ -233,6 +250,8 @@ where
         self.selection_state = SelectionState::Row;
         self.right_clicked_row = None;
         self.selected_row = Some(row_ix);
+        self.selected_col = None;
+        self.selected_cell = None;
         if let Some(row_ix) = self.selected_row {
             self.vertical_scroll_handle.scroll_to_item(
                 row_ix,
@@ -256,6 +275,8 @@ where
     pub fn set_selected_col(&mut self, col_ix: usize, cx: &mut Context<Self>) {
         self.selection_state = SelectionState::Column;
         self.selected_col = Some(col_ix);
+        self.selected_row = None;
+        self.selected_cell = None;
         if let Some(col_ix) = self.selected_col {
             self.scroll_to_col(col_ix, cx);
         }
@@ -268,6 +289,24 @@ where
         self.selection_state = SelectionState::Row;
         self.selected_row = None;
         self.selected_col = None;
+        self.selected_cell = None;
+        cx.notify();
+    }
+
+
+    pub fn selected_cell(&self) -> Option<(usize, usize)> {
+        self.selected_cell
+    }
+
+    pub fn set_selected_cell(&mut self, row_ix: usize, col_ix: usize, cx: &mut Context<Self>) {
+        self.selection_state = SelectionState::Cell;
+        self.selected_cell = Some((row_ix, col_ix));
+        self.selected_col = None;
+        self.selected_row = None;
+        if let Some(col_ix) = self.selected_col {
+            self.scroll_to_col(col_ix, cx);
+        }
+        cx.emit(TableEvent::SelectCell(row_ix, col_ix));
         cx.notify();
     }
 
@@ -279,16 +318,33 @@ where
     }
 
     fn prepare_col_groups(&mut self, cx: &mut Context<Self>) {
-        self.col_groups = (0..self.delegate.columns_count(cx))
-            .map(|col_ix| {
-                let column = self.delegate().column(col_ix, cx);
-                ColGroup {
-                    width: column.width,
-                    bounds: Bounds::default(),
-                    column: column.clone(),
-                }
-            })
-            .collect();
+        let mut col_groups = Vec::new();
+
+        // Add row number column if enabled
+        if self.delegate.row_number_enabled(cx) {
+            col_groups.push(ColGroup {
+                width: px(60.),
+                bounds: Bounds::default(),
+                column: Column::new("__row_number__", " ")
+                    .width(px(60.))
+                    .resizable(false)
+                    .movable(false)
+                    .selectable(false)
+                    .text_right(),
+            });
+        }
+
+        // Add user-defined columns
+        col_groups.extend((0..self.delegate.columns_count(cx)).map(|col_ix| {
+            let column = self.delegate().column(col_ix, cx);
+            ColGroup {
+                width: column.width,
+                bounds: Bounds::default(),
+                column: column.clone(),
+            }
+        }));
+
+        self.col_groups = col_groups;
         cx.notify();
     }
 
@@ -315,16 +371,153 @@ where
 
     fn on_row_left_click(
         &mut self,
-        e: &ClickEvent,
+        _: &ClickEvent,
         row_ix: usize,
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
         self.set_selected_row(row_ix, cx);
+    }
+
+    fn on_cell_click(
+        &mut self,
+        e: &ClickEvent,
+        row_ix: usize,
+        col_ix: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // If clicking on a different cell while editing, commit current edit first
+        if let Some((edit_row, edit_col)) = self.editing_cell {
+            if edit_row != row_ix || edit_col != col_ix {
+                self.commit_cell_edit(window, cx);
+            }
+        }
+
+        // Check if this is the row number column
+        let is_row_number_col = self.delegate.row_number_enabled(cx) && col_ix == 0;
 
         if e.click_count() == 2 {
-            cx.emit(TableEvent::DoubleClickedRow(row_ix));
+            // Double click: enter edit mode (not for row number column)
+            if !is_row_number_col {
+                // Calculate the actual column index for delegate
+                let delegate_col_ix = if self.delegate.row_number_enabled(cx) {
+                    col_ix - 1
+                } else {
+                    col_ix
+                };
+                
+                if self.delegate.is_cell_editable(row_ix, delegate_col_ix, cx) {
+                    self.start_editing(row_ix, col_ix, window, cx);
+                }
+            }
+        } else {
+            // Single click
+            if is_row_number_col {
+                // Click on row number column: select entire row
+                self.set_selected_row(row_ix, cx);
+            } else {
+                // Click on other cells: emit cell selection event
+                self.set_selected_cell(row_ix, col_ix, cx);
+            }
         }
+    }
+
+    /// Start editing a cell.
+    pub fn start_editing(
+        &mut self,
+        row_ix: usize,
+        col_ix: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // Calculate the actual column index for delegate
+        let delegate_col_ix = if self.delegate.row_number_enabled(cx) {
+            col_ix.saturating_sub(1)
+        } else {
+            col_ix
+        };
+
+        // Get the current cell value from delegate
+        let value = self.delegate.get_cell_value(row_ix, delegate_col_ix, cx);
+
+        // Create input state with the current value (support multiline)
+        let input = cx.new(|cx| {
+            let mut state = InputState::new(window, cx).multi_line().rows(1);
+            state.set_value(value, window, cx);
+            state
+        });
+
+        self.editing_cell = Some((row_ix, col_ix));
+        self.editing_input = Some(input);
+        cx.emit(TableEvent::CellEditing(row_ix, col_ix));
+        cx.notify();
+    }
+
+    /// Commit the current cell edit.
+    pub fn commit_cell_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some((row_ix, col_ix)) = self.editing_cell {
+            // Calculate the actual column index for delegate
+            let delegate_col_ix = if self.delegate.row_number_enabled(cx) {
+                col_ix.saturating_sub(1)
+            } else {
+                col_ix
+            };
+
+            // Get the new value from the input
+            let new_value = self
+                .editing_input
+                .as_ref()
+                .map(|input| input.read(cx).text().to_string())
+                .unwrap_or_default();
+
+            // Call delegate to handle the edit
+            let accepted = self
+                .delegate
+                .on_cell_edited(row_ix, delegate_col_ix, new_value, window, cx);
+            if accepted {
+                cx.emit(TableEvent::CellEdited(row_ix, col_ix));
+            }
+            self.editing_cell = None;
+            self.editing_input = None;
+            cx.notify();
+        }
+    }
+
+    /// Cancel the current cell edit.
+    pub fn cancel_cell_edit(&mut self, cx: &mut Context<Self>) {
+        if self.editing_cell.is_some() {
+            self.editing_cell = None;
+            self.editing_input = None;
+            cx.notify();
+        }
+    }
+
+    /// Returns the editing input state if currently editing.
+    pub fn editing_input(&self) -> Option<&Entity<InputState>> {
+        self.editing_input.as_ref()
+    }
+
+    /// Returns the currently editing cell position.
+    pub fn editing_cell(&self) -> Option<(usize, usize)> {
+        self.editing_cell
+    }
+
+    /// Add a new row.
+    pub fn add_row(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.delegate.on_row_added(window, cx);
+        cx.emit(TableEvent::RowAdded);
+        self.refresh(cx);
+    }
+
+    /// Delete a row.
+    pub fn delete_row(&mut self, row_ix: usize, window: &mut Window, cx: &mut Context<Self>) {
+        self.delegate.on_row_deleted(row_ix, window, cx);
+        cx.emit(TableEvent::RowDeleted(row_ix));
+        if self.selected_row == Some(row_ix) {
+            self.selected_row = None;
+        }
+        self.refresh(cx);
     }
 
     fn on_col_head_click(&mut self, col_ix: usize, _: &mut Window, cx: &mut Context<Self>) {
@@ -347,7 +540,20 @@ where
         self.selected_row.is_some() || self.selected_col.is_some()
     }
 
+    pub(super) fn action_confirm(&mut self, _: &Confirm, window: &mut Window, cx: &mut Context<Self>) {
+        // Commit editing if in edit mode
+        if self.editing_cell.is_some() {
+            self.commit_cell_edit(window, cx);
+        }
+    }
+
     pub(super) fn action_cancel(&mut self, _: &Cancel, _: &mut Window, cx: &mut Context<Self>) {
+        // Cancel editing first if in edit mode
+        if self.editing_cell.is_some() {
+            self.cancel_cell_edit(cx);
+            return;
+        }
+
         if self.has_selection() {
             self.clear_selection(cx);
             return;
@@ -527,7 +733,14 @@ where
             }
         }
 
-        self.delegate_mut().perform_sort(col_ix, sort, window, cx);
+        // Calculate the actual column index for delegate
+        let delegate_col_ix = if self.delegate.row_number_enabled(cx) {
+            col_ix.saturating_sub(1)
+        } else {
+            col_ix
+        };
+
+        self.delegate_mut().perform_sort(delegate_col_ix, sort, window, cx);
 
         cx.notify();
     }
@@ -543,7 +756,17 @@ where
             return;
         }
 
-        self.delegate.move_column(col_ix, to_ix, window, cx);
+        // Don't allow moving the row number column
+        let row_number_offset = if self.delegate.row_number_enabled(cx) { 1 } else { 0 };
+        if row_number_offset > 0 && (col_ix == 0 || to_ix == 0) {
+            return;
+        }
+
+        // Calculate the actual column indices for delegate
+        let delegate_col_ix = col_ix.saturating_sub(row_number_offset);
+        let delegate_to_ix = to_ix.saturating_sub(row_number_offset);
+
+        self.delegate.move_column(delegate_col_ix, delegate_to_ix, window, cx);
         let col_group = self.col_groups.remove(col_ix);
         self.col_groups.insert(to_ix, col_group);
 
@@ -604,21 +827,70 @@ where
         }
     }
 
-    fn render_cell(&self, col_ix: usize, _window: &mut Window, _cx: &mut Context<Self>) -> Div {
+    fn render_cell(
+        &self,
+        col_ix: usize,
+        row_ix: Option<usize>,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> gpui::Stateful<Div> {
         let Some(col_group) = self.col_groups.get(col_ix) else {
-            return div();
+            return div().id("empty-cell");
         };
-
+        let is_select_cell = match self.selected_cell {
+            None => false,
+            Some(cell) => row_ix.is_some() && row_ix.unwrap() == cell.0 && col_ix == cell.1
+        };
         let col_width = col_group.width;
         let col_padding = col_group.column.paddings;
 
+        // Check if cell is modified (skip for row number column)
+        let is_row_number_col = self.delegate.row_number_enabled(cx) && col_ix == 0;
+        let is_modified = if is_row_number_col {
+            false
+        } else {
+            row_ix
+                .map(|r| {
+                    let delegate_col_ix = if self.delegate.row_number_enabled(cx) {
+                        col_ix - 1
+                    } else {
+                        col_ix
+                    };
+                    self.delegate.is_cell_modified(r, delegate_col_ix, cx)
+                })
+                .unwrap_or(false)
+        };
+
+        // Generate unique id: for cells use row*10000+col, for headers use col
+        let cell_id = match row_ix {
+            Some(r) => ("cell", r * 10000 + col_ix),
+            None => ("cell-header", col_ix),
+        };
+
         div()
+            .id(cell_id)
             .w(col_width)
             .h_full()
             .flex_shrink_0()
             .overflow_hidden()
             .whitespace_nowrap()
             .table_cell_size(self.options.size)
+            .when(is_select_cell, |this| {
+                this.border_color(gpui::transparent_white()).child(
+                    div()
+                        .top(if row_ix.is_some() && row_ix.unwrap() == 0 { px(0.) } else { px(-1.) })
+                        .left(px(0.))
+                        .right(px(0.))
+                        .bottom(px(-1.))
+                        .absolute()
+                        .bg(cx.theme().table_active)
+                        .border_1()
+                        .border_color(cx.theme().table_active_border),
+                )
+            })
+            .when(is_modified, |this| {
+                this.bg(cx.theme().warning.opacity(0.15))
+            })
             .map(|this| match col_padding {
                 Some(padding) => this
                     .pl(padding.left)
@@ -676,7 +948,7 @@ where
             .cursor_col_resize()
             .h_full()
             .w(HANDLE_SIZE)
-            .ml(-(HANDLE_SIZE))
+            .ml(-HANDLE_SIZE)
             .justify_end()
             .items_center()
             .child(
@@ -800,14 +1072,15 @@ where
         let entity_id = cx.entity_id();
         let col_group = self.col_groups.get(col_ix).expect("BUG: invalid col index");
 
-        let movable = self.col_movable && col_group.column.movable;
+        let is_row_number_col = self.delegate.row_number_enabled(cx) && col_ix == 0;
+        let movable = self.col_movable && col_group.column.movable && !is_row_number_col;
         let paddings = col_group.column.paddings;
         let name = col_group.column.name.clone();
 
         h_flex()
             .h_full()
             .child(
-                self.render_cell(col_ix, window, cx)
+                self.render_cell(col_ix, None, window, cx)
                     .id(("col-header", col_ix))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.on_col_head_click(col_ix, window, cx);
@@ -817,7 +1090,26 @@ where
                             .size_full()
                             .justify_between()
                             .items_center()
-                            .child(self.delegate.render_th(col_ix, window, cx))
+                            .child(
+                                if is_row_number_col {
+                                    // Render row number column header
+                                    div()
+                                        .size_full()
+                                        .flex()
+                                        .items_center()
+                                        .justify_end()
+                                        .child(col_group.column.name.clone())
+                                        .into_any_element()
+                                } else {
+                                    // Calculate the actual column index for delegate
+                                    let delegate_col_ix = if self.delegate.row_number_enabled(cx) {
+                                        col_ix - 1
+                                    } else {
+                                        col_ix
+                                    };
+                                    self.delegate.render_th(delegate_col_ix, window, cx).into_any_element()
+                                }
+                            )
                             .when_some(paddings, |this, paddings| {
                                 // Leave right space for the sort icon, if this column have custom padding
                                 let offset_pr =
@@ -1009,11 +1301,23 @@ where
                                 let mut items = Vec::with_capacity(left_columns_count);
 
                                 (0..left_columns_count).for_each(|col_ix| {
-                                    items.push(self.render_col_wrap(col_ix, window, cx).child(
-                                        self.render_cell(col_ix, window, cx).child(
-                                            self.measure_render_td(row_ix, col_ix, window, cx),
+                                    items.push(
+                                        self.render_col_wrap(col_ix, window, cx).child(
+                                            self.render_cell(col_ix, Some(row_ix), window, cx)
+                                                .on_click(cx.listener(
+                                                    move |this, e, window, cx| {
+                                                        this.on_cell_click(
+                                                            e, row_ix, col_ix, window, cx,
+                                                        );
+                                                    },
+                                                ))
+                                                .child(
+                                                    self.measure_render_td(
+                                                        row_ix, col_ix, window, cx,
+                                                    ),
+                                                ),
                                         ),
-                                    ));
+                                    );
                                 });
 
                                 items
@@ -1059,13 +1363,21 @@ where
 
                                         visible_range.for_each(|col_ix| {
                                             let col_ix = col_ix + left_columns_count;
-                                            let el =
-                                                table.render_col_wrap(col_ix, window, cx).child(
-                                                    table.render_cell(col_ix, window, cx).child(
-                                                        table.measure_render_td(
+                                            let el = table
+                                                .render_col_wrap(col_ix, window, cx)
+                                                .child(
+                                                    table
+                                                        .render_cell(col_ix, Some(row_ix), window, cx)
+                                                        .on_click(cx.listener(
+                                                            move |this, e, window, cx| {
+                                                                this.on_cell_click(
+                                                                    e, row_ix, col_ix, window, cx,
+                                                                );
+                                                            },
+                                                        ))
+                                                        .child(table.measure_render_td(
                                                             row_ix, col_ix, window, cx,
-                                                        ),
-                                                    ),
+                                                        )),
                                                 );
 
                                             items.push(el);
@@ -1117,9 +1429,6 @@ where
                         this.on_row_right_click(e, row_ix, window, cx);
                     }),
                 )
-                .on_click(cx.listener(move |this, e, window, cx| {
-                    this.on_row_left_click(e, row_ix, window, cx);
-                }))
         } else {
             // Render fake rows to fill the rest table space
             self.delegate
@@ -1133,7 +1442,7 @@ where
                 .children((0..columns_count).map(|col_ix| {
                     h_flex()
                         .left(horizontal_scroll_handle.offset().x)
-                        .child(self.render_cell(col_ix, window, cx))
+                        .child(self.render_cell(col_ix, Some(row_ix), window, cx))
                 }))
                 .child(self.delegate.render_last_empty_col(window, cx))
         }
@@ -1164,17 +1473,68 @@ where
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
+        // Check if this is the row number column
+        let is_row_number_col = self.delegate.row_number_enabled(cx) && col_ix == 0;
+        
+        if is_row_number_col {
+            // Render row number
+            return div()
+                .id(ElementId::Name(format!("row-number-{}", row_ix).into()))
+                .size_full()
+                .flex()
+                .items_center()
+                .justify_end()
+                .text_color(cx.theme().muted_foreground)
+                .child((row_ix + 1).to_string())
+                .on_click(cx.listener(move |this, e, window, cx| {
+                    this.on_row_left_click(e, row_ix, window, cx);
+                }))
+                .into_any_element();
+        }
+
+        // Calculate the actual column index for delegate (subtract row number column offset)
+        let delegate_col_ix = if self.delegate.row_number_enabled(cx) {
+            col_ix - 1
+        } else {
+            col_ix
+        };
+
+        let is_editing = self.editing_cell == Some((row_ix, col_ix));
+
         if !crate::measure_enable() {
+            if is_editing {
+                if let Some(input) = &self.editing_input {
+                    return div()
+                        .size_full()
+                        .child(Input::new(input).with_size(Size::Medium))
+                        .into_any_element();
+                }
+            }
             return self
                 .delegate
-                .render_td(row_ix, col_ix, window, cx)
+                .render_td(row_ix, delegate_col_ix, window, cx)
                 .into_any_element();
         }
 
         let start = std::time::Instant::now();
-        let el = self.delegate.render_td(row_ix, col_ix, window, cx);
+        let el = if is_editing {
+            if let Some(input) = &self.editing_input {
+                div()
+                    .size_full()
+                    .child(Input::new(input).with_size(Size::Small))
+                    .into_any_element()
+            } else {
+                self.delegate
+                    .render_td(row_ix, delegate_col_ix, window, cx)
+                    .into_any_element()
+            }
+        } else {
+            self.delegate
+                .render_td(row_ix, delegate_col_ix, window, cx)
+                .into_any_element()
+        };
         self._measure.push(start.elapsed());
-        el.into_any_element()
+        el
     }
 
     fn measure(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {

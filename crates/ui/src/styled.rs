@@ -240,7 +240,7 @@ impl Size {
             Size::XSmall => px(26.),
             Size::Small => px(30.),
             Size::Large => px(40.),
-            _ => px(32.),
+            _ => px(40.),
         }
     }
 

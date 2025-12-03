@@ -110,6 +110,8 @@ impl MultiTextEditor {
         });
     }
 
+
+
     pub fn format_json(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let text = self.json_editor.read(cx).text().to_string();
         match serde_json::from_str::<serde_json::Value>(&text) {

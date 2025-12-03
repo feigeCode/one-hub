@@ -15,6 +15,11 @@ use crate::{
 /// A delegate trait for providing data and rendering for a table.
 #[allow(unused)]
 pub trait TableDelegate: Sized + 'static {
+    /// Return true to enable row number column, default is false.
+    fn row_number_enabled(&self, cx: &App) -> bool {
+        false
+    }
+
     /// Return the number of columns in the table.
     fn columns_count(&self, cx: &App) -> usize;
 
@@ -67,6 +72,48 @@ pub trait TableDelegate: Sized + 'static {
         window: &mut Window,
         cx: &mut App,
     ) -> impl IntoElement;
+
+    /// Return true if the cell is editable, default is false.
+    fn is_cell_editable(&self, row_ix: usize, col_ix: usize, cx: &App) -> bool {
+        false
+    }
+
+    /// Get the current value of a cell as a string for editing.
+    fn get_cell_value(&self, row_ix: usize, col_ix: usize, cx: &App) -> String {
+        String::new()
+    }
+
+    /// Called when editing is committed (e.g., Enter key or blur).
+    /// The `new_value` is the edited string value.
+    /// Return true to accept the edit, false to cancel.
+    fn on_cell_edited(
+        &mut self,
+        row_ix: usize,
+        col_ix: usize,
+        new_value: String,
+        window: &mut Window,
+        cx: &mut Context<TableState<Self>>,
+    ) -> bool {
+        true
+    }
+
+    /// Return true if the cell has been modified.
+    /// Used to highlight modified cells.
+    fn is_cell_modified(&self, row_ix: usize, col_ix: usize, cx: &App) -> bool {
+        false
+    }
+
+    /// Called when a row is added.
+    fn on_row_added(&mut self, window: &mut Window, cx: &mut Context<TableState<Self>>) {}
+
+    /// Called when a row is deleted.
+    fn on_row_deleted(
+        &mut self,
+        row_ix: usize,
+        window: &mut Window,
+        cx: &mut Context<TableState<Self>>,
+    ) {
+    }
 
     /// Move the column at the given `col_ix` to insert before the column at the given `to_ix`.
     fn move_column(

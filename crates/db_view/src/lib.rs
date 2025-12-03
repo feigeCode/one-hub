@@ -5,6 +5,8 @@ pub mod database_objects_tab;
 pub mod database_tab;
 pub mod db_connection_form;
 pub mod db_tree_view;
+pub mod filter_editor;
+pub mod multi_text_editor;
 pub mod results_delegate;
 pub mod sql_editor;
 pub mod sql_editor_view;

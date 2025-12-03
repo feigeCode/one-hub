@@ -198,7 +198,6 @@ impl DbTreeView {
     fn lazy_load_children(&mut self, node_id: String, cx: &mut Context<Self>) {
         // 如果已经加载过或正在加载，跳过
         if self.loaded_children.contains(&node_id) || self.loading_nodes.contains(&node_id) {
-            eprintln!("Skipping {}: already loaded or loading", node_id);
             return;
         }
 

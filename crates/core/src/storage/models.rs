@@ -1,7 +1,7 @@
-use gpui_component::IconName;
-use serde::{Deserialize, Serialize};
-
 use crate::storage::traits::Entity;
+use gpui_component::Size::Large;
+use gpui_component::{Icon, IconName, Sizable};
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum ConnectionType {
@@ -17,6 +17,8 @@ pub enum ConnectionType {
 pub enum DatabaseType {
     MySQL,
     PostgreSQL,
+    MSSQL,
+    Oracle
 }
 
 impl DatabaseType {
@@ -24,6 +26,8 @@ impl DatabaseType {
         match self {
             DatabaseType::MySQL => "MySQL",
             DatabaseType::PostgreSQL => "PostgreSQL",
+            DatabaseType::MSSQL => "MSSQL",
+            DatabaseType::Oracle => "Oracle",
         }
     }
 
@@ -31,7 +35,18 @@ impl DatabaseType {
         match s {
             "MySQL" => Some(DatabaseType::MySQL),
             "PostgreSQL" => Some(DatabaseType::PostgreSQL),
+            "MSSQL" => Some(DatabaseType::MSSQL),
+            "Oracle" => Some(DatabaseType::Oracle),
             _ => None,
+        }
+    }
+
+    pub fn as_icon(&self) -> Icon {
+        match self {
+            DatabaseType::MySQL => IconName::MySQLColor.color().with_size(Large),
+            DatabaseType::PostgreSQL => IconName::PostgreSQLColor.color().with_size(Large),
+            DatabaseType::MSSQL => IconName::MSSQLColor.color().with_size(Large),
+            DatabaseType::Oracle => IconName::OracleColor.color().with_size(Large),
         }
     }
 }

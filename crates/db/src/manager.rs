@@ -21,6 +21,7 @@ impl DbManager {
         match db_type {
             DatabaseType::MySQL => Ok(Box::new(MySqlPlugin::new())),
             DatabaseType::PostgreSQL => Ok(Box::new(PostgresPlugin::new())),
+            _ => Err(DbError::new("Unsupported database type")),
         }
     }
 }

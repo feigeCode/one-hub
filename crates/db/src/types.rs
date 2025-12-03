@@ -452,3 +452,221 @@ pub struct ObjectView {
     pub rows: Vec<Vec<String>>,
 }
 
+// === Table Data Query Types ===
+
+/// Abstract data type for UI rendering
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FieldType {
+    /// Integer numbers (INT, BIGINT, SMALLINT, etc.)
+    Integer,
+    /// Decimal numbers (DECIMAL, NUMERIC, FLOAT, DOUBLE, etc.)
+    Decimal,
+    /// Short text (VARCHAR, CHAR)
+    Text,
+    /// Long text (TEXT, LONGTEXT, CLOB)
+    LongText,
+    /// Boolean (BOOL, BOOLEAN, BIT)
+    Boolean,
+    /// Date only (DATE)
+    Date,
+    /// Time only (TIME)
+    Time,
+    /// Date and time (DATETIME, TIMESTAMP)
+    DateTime,
+    /// Binary data (BLOB, BINARY, BYTEA)
+    Binary,
+    /// JSON data
+    Json,
+    /// Unknown or unsupported type
+    Unknown,
+}
+
+impl FieldType {
+    /// Infer field type from database type string
+    pub fn from_db_type(db_type: &str) -> Self {
+        let upper = db_type.to_uppercase();
+        let base_type = upper.split('(').next().unwrap_or(&upper).trim();
+
+        match base_type {
+            // Integer types
+            "INT" | "INTEGER" | "BIGINT" | "SMALLINT" | "TINYINT" | "MEDIUMINT" | "SERIAL" | "BIGSERIAL" | "SMALLSERIAL" => Self::Integer,
+            // Decimal types
+            "DECIMAL" | "NUMERIC" | "FLOAT" | "DOUBLE" | "REAL" | "DOUBLE PRECISION" | "MONEY" => Self::Decimal,
+            // Boolean
+            "BOOL" | "BOOLEAN" | "BIT" => Self::Boolean,
+            // Date/Time
+            "DATE" => Self::Date,
+            "TIME" => Self::Time,
+            "DATETIME" | "TIMESTAMP" | "TIMESTAMPTZ" => Self::DateTime,
+            // Text types
+            "CHAR" | "VARCHAR" | "NCHAR" | "NVARCHAR" | "CHARACTER VARYING" | "CHARACTER" => Self::Text,
+            "TEXT" | "LONGTEXT" | "MEDIUMTEXT" | "TINYTEXT" | "CLOB" | "NTEXT" => Self::LongText,
+            // Binary
+            "BLOB" | "LONGBLOB" | "MEDIUMBLOB" | "TINYBLOB" | "BINARY" | "VARBINARY" | "BYTEA" | "IMAGE" => Self::Binary,
+            // JSON
+            "JSON" | "JSONB" => Self::Json,
+            _ => Self::Unknown,
+        }
+    }
+}
+
+/// Column metadata for table data display
+#[derive(Debug, Clone)]
+pub struct TableColumnMeta {
+    /// Column name
+    pub name: String,
+    /// Original database type (e.g., "VARCHAR(255)")
+    pub db_type: String,
+    /// Abstract field type for UI rendering
+    pub field_type: FieldType,
+    /// Whether the column is nullable
+    pub nullable: bool,
+    /// Whether the column is a primary key
+    pub is_primary_key: bool,
+    /// Column index in the result set
+    pub index: usize,
+}
+
+/// Filter condition for querying table data
+#[derive(Debug, Clone)]
+pub struct FilterCondition {
+    /// Column name
+    pub column: String,
+    /// Operator (=, !=, >, <, >=, <=, LIKE, IN, IS NULL, IS NOT NULL)
+    pub operator: FilterOperator,
+    /// Value (ignored for IS NULL / IS NOT NULL)
+    pub value: String,
+}
+
+/// Filter operator
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FilterOperator {
+    #[default]
+    Equal,
+    NotEqual,
+    GreaterThan,
+    LessThan,
+    GreaterOrEqual,
+    LessOrEqual,
+    Like,
+    NotLike,
+    In,
+    NotIn,
+    IsNull,
+    IsNotNull,
+}
+
+impl FilterOperator {
+    pub fn to_sql(&self) -> &'static str {
+        match self {
+            Self::Equal => "=",
+            Self::NotEqual => "!=",
+            Self::GreaterThan => ">",
+            Self::LessThan => "<",
+            Self::GreaterOrEqual => ">=",
+            Self::LessOrEqual => "<=",
+            Self::Like => "LIKE",
+            Self::NotLike => "NOT LIKE",
+            Self::In => "IN",
+            Self::NotIn => "NOT IN",
+            Self::IsNull => "IS NULL",
+            Self::IsNotNull => "IS NOT NULL",
+        }
+    }
+}
+
+/// Sort direction
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SortDirection {
+    Asc,
+    Desc,
+}
+
+/// Sort condition
+#[derive(Debug, Clone)]
+pub struct SortCondition {
+    pub column: String,
+    pub direction: SortDirection,
+}
+
+/// Request for querying table data with pagination and filtering
+#[derive(Debug, Clone, Default)]
+pub struct TableDataRequest {
+    /// Database name
+    pub database: String,
+    /// Table name
+    pub table: String,
+    /// Page number (1-based)
+    pub page: usize,
+    /// Page size
+    pub page_size: usize,
+    /// Filter conditions (structured)
+    pub filters: Vec<FilterCondition>,
+    /// Sort conditions (structured)
+    pub sorts: Vec<SortCondition>,
+    /// Raw WHERE clause (e.g., "id > 10 AND name LIKE '%test%'")
+    pub where_clause: Option<String>,
+    /// Raw ORDER BY clause (e.g., "id DESC, name ASC")
+    pub order_by_clause: Option<String>,
+}
+
+impl TableDataRequest {
+    pub fn new(database: impl Into<String>, table: impl Into<String>) -> Self {
+        Self {
+            database: database.into(),
+            table: table.into(),
+            page: 1,
+            page_size: 100,
+            filters: Vec::new(),
+            sorts: Vec::new(),
+            where_clause: None,
+            order_by_clause: None,
+        }
+    }
+
+    pub fn with_page(mut self, page: usize, page_size: usize) -> Self {
+        self.page = page;
+        self.page_size = page_size;
+        self
+    }
+
+    pub fn with_filter(mut self, filter: FilterCondition) -> Self {
+        self.filters.push(filter);
+        self
+    }
+
+    pub fn with_sort(mut self, sort: SortCondition) -> Self {
+        self.sorts.push(sort);
+        self
+    }
+
+    pub fn with_where_clause(mut self, clause: impl Into<String>) -> Self {
+        let c = clause.into();
+        self.where_clause = if c.is_empty() { None } else { Some(c) };
+        self
+    }
+
+    pub fn with_order_by_clause(mut self, clause: impl Into<String>) -> Self {
+        let c = clause.into();
+        self.order_by_clause = if c.is_empty() { None } else { Some(c) };
+        self
+    }
+}
+
+/// Response for table data query
+#[derive(Debug, Clone)]
+pub struct TableDataResponse {
+    /// Column metadata
+    pub columns: Vec<TableColumnMeta>,
+    /// Row data (each cell is Option<String>, None means NULL)
+    pub rows: Vec<Vec<Option<String>>>,
+    /// Total row count (for pagination)
+    pub total_count: usize,
+    /// Current page
+    pub page: usize,
+    /// Page size
+    pub page_size: usize,
+    /// Primary key column indices
+    pub primary_key_indices: Vec<usize>,
+}
+

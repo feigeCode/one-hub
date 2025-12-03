@@ -1,7 +1,7 @@
 use std::rc::Rc;
 
 use anyhow::Result;
-use gpui::{App, AppContext, Context, Div, Entity, IntoElement, ParentElement, Render, Styled as _, Task, Window};
+use gpui::{px, App, AppContext, Context, Div, Entity, IntoElement, ParentElement, Render, Styled as _, Task, Window};
 use gpui_component::highlighter::Language;
 use gpui_component::input::{CompletionProvider, Input, InputState};
 use gpui_component::{ActiveTheme, Rope, RopeExt};
@@ -686,6 +686,7 @@ impl Render for TableFilterEditor {
         h_flex()
             .size_full()
             .gap_3()
+            .px_2()
             .child(
                 h_flex()
                     .flex_1()

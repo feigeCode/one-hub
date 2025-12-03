@@ -15,6 +15,8 @@ pub trait DatabasePlugin: Send + Sync {
         match self.name() {
             DatabaseType::MySQL => "`",
             DatabaseType::PostgreSQL => "\"",
+            DatabaseType::MSSQL => "",
+            DatabaseType::Oracle => "",
         }
     }
 
@@ -334,6 +336,141 @@ pub trait DatabasePlugin: Send + Sync {
 
     async fn switch_db(&self, connection: &dyn DbConnection, database: &str) -> Result<SqlResult>;
 
+    // === Table Data Operations ===
+    /// Query table data with pagination, filtering and sorting
+    async fn query_table_data(
+        &self,
+        connection: &dyn DbConnection,
+        request: &TableDataRequest,
+    ) -> Result<TableDataResponse> {
+        let quote = self.identifier_quote();
+
+        // Get column metadata
+        let columns_info = self.list_columns(connection, &request.database, &request.table).await?;
+        let columns: Vec<TableColumnMeta> = columns_info
+            .iter()
+            .enumerate()
+            .map(|(i, c)| TableColumnMeta {
+                name: c.name.clone(),
+                db_type: c.data_type.clone(),
+                field_type: FieldType::from_db_type(&c.data_type),
+                nullable: c.is_nullable,
+                is_primary_key: c.is_primary_key,
+                index: i,
+            })
+            .collect();
+
+        let primary_key_indices: Vec<usize> = columns
+            .iter()
+            .filter(|c| c.is_primary_key)
+            .map(|c| c.index)
+            .collect();
+
+        // Build WHERE clause: raw clause takes priority, then structured filters
+        let where_clause = if let Some(raw_where) = &request.where_clause {
+            if raw_where.is_empty() {
+                String::new()
+            } else {
+                format!(" WHERE {}", raw_where)
+            }
+        } else if request.filters.is_empty() {
+            String::new()
+        } else {
+            let conditions: Vec<String> = request
+                .filters
+                .iter()
+                .map(|f| {
+                    let col = format!("{}{}{}", quote, f.column, quote);
+                    match f.operator {
+                        FilterOperator::IsNull => format!("{} IS NULL", col),
+                        FilterOperator::IsNotNull => format!("{} IS NOT NULL", col),
+                        FilterOperator::In | FilterOperator::NotIn => {
+                            format!("{} {} ({})", col, f.operator.to_sql(), f.value)
+                        }
+                        FilterOperator::Like | FilterOperator::NotLike => {
+                            format!("{} {} '{}'", col, f.operator.to_sql(), f.value.replace('\'', "''"))
+                        }
+                        _ => format!("{} {} '{}'", col, f.operator.to_sql(), f.value.replace('\'', "''"))
+                    }
+                })
+                .collect();
+            format!(" WHERE {}", conditions.join(" AND "))
+        };
+
+        // Build ORDER BY clause: raw clause takes priority, then structured sorts
+        let order_clause = if let Some(raw_order) = &request.order_by_clause {
+            if raw_order.is_empty() {
+                String::new()
+            } else {
+                format!(" ORDER BY {}", raw_order)
+            }
+        } else if request.sorts.is_empty() {
+            String::new()
+        } else {
+            let sorts: Vec<String> = request
+                .sorts
+                .iter()
+                .map(|s| {
+                    let dir = match s.direction {
+                        SortDirection::Asc => "ASC",
+                        SortDirection::Desc => "DESC",
+                    };
+                    format!("{}{}{} {}", quote, s.column, quote, dir)
+                })
+                .collect();
+            format!(" ORDER BY {}", sorts.join(", "))
+        };
+
+        // Calculate offset
+        let offset = (request.page.saturating_sub(1)) * request.page_size;
+
+        // Build count query
+        let count_sql = format!(
+            "SELECT COUNT(*) FROM {}{}{}.{}{}{}{}",
+            quote, request.database, quote,
+            quote, request.table, quote,
+            where_clause
+        );
+
+        // Get total count
+        let total_count = match self.execute_query(connection, &request.database, &count_sql, None).await? {
+            SqlResult::Query(result) => {
+                result.rows.first()
+                    .and_then(|r| r.first())
+                    .and_then(|v| v.as_ref())
+                    .and_then(|s| s.parse::<usize>().ok())
+                    .unwrap_or(0)
+            }
+            _ => 0,
+        };
+
+        // Build data query with pagination
+        let data_sql = format!(
+            "SELECT * FROM {}{}{}.{}{}{}{}{} LIMIT {} OFFSET {}",
+            quote, request.database, quote,
+            quote, request.table, quote,
+            where_clause,
+            order_clause,
+            request.page_size,
+            offset
+        );
+
+        // Execute data query
+        let rows = match self.execute_query(connection, &request.database, &data_sql, None).await? {
+            SqlResult::Query(result) => result.rows,
+            _ => Vec::new(),
+        };
+
+        Ok(TableDataResponse {
+            columns,
+            rows,
+            total_count,
+            page: request.page,
+            page_size: request.page_size,
+            primary_key_indices,
+        })
+    }
+
     // === Data Types ===
     /// Get list of available data types for this database
     fn get_data_types(&self) -> Vec<DataTypeInfo> {
@@ -384,6 +521,7 @@ pub trait DatabasePlugin: Send + Sync {
                 self.quote_identifier(old_name),
                 self.quote_identifier(new_name)
             ),
+            DatabaseType::MSSQL | DatabaseType::Oracle => todo!(),
         };
         self.execute_query(connection, database, &query, None).await?;
         Ok(())
