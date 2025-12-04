@@ -5,20 +5,21 @@ use crate::actions::{Cancel, Confirm, SelectDown, SelectUp};
 use crate::input::InputState;
 use crate::list::cache::{MeasuredEntrySize, RowEntry, RowsCache};
 use crate::{
+    ActiveTheme, IconName, Size,
     input::{Input, InputEvent},
-    scroll::{Scrollbar, ScrollbarState},
-    v_flex, ActiveTheme, IconName, Size,
+    scroll::Scrollbar,
+    v_flex,
 };
-use crate::{list::ListDelegate, v_virtual_list, VirtualListScrollHandle};
 use crate::{Icon, IndexPath, Selectable, Sizable, StyledExt};
+use crate::{VirtualListScrollHandle, list::ListDelegate, v_virtual_list};
 use gpui::{
-    div, prelude::FluentBuilder, AppContext, Entity, FocusHandle, Focusable, InteractiveElement,
-    IntoElement, KeyBinding, Length, MouseButton, ParentElement, Render, Styled, Task, Window,
+    App, AvailableSpace, ClickEvent, Context, DefiniteLength, EdgesRefinement, EventEmitter,
+    ListSizingBehavior, RenderOnce, ScrollStrategy, SharedString, StatefulInteractiveElement,
+    StyleRefinement, Subscription, px, size,
 };
 use gpui::{
-    px, size, App, AvailableSpace, ClickEvent, Context, DefiniteLength, EdgesRefinement,
-    EventEmitter, ListSizingBehavior, RenderOnce, ScrollStrategy, SharedString,
-    StatefulInteractiveElement, StyleRefinement, Subscription,
+    AppContext, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement, KeyBinding,
+    Length, MouseButton, ParentElement, Render, Styled, Task, Window, div, prelude::FluentBuilder,
 };
 use rust_i18n::t;
 use smol::Timer;
@@ -65,6 +66,8 @@ impl Default for ListOptions {
 }
 
 /// The state for List.
+///
+/// List required all items has the same height.
 pub struct ListState<D: ListDelegate> {
     pub(crate) focus_handle: FocusHandle,
     pub(crate) query_input: Entity<InputState>,
@@ -72,7 +75,6 @@ pub struct ListState<D: ListDelegate> {
     delegate: D,
     last_query: Option<String>,
     scroll_handle: VirtualListScrollHandle,
-    scroll_state: ScrollbarState,
     rows_cache: RowsCache,
     selected_index: Option<IndexPath>,
     item_to_measure_index: IndexPath,
@@ -111,7 +113,6 @@ where
             deferred_scroll_to_index: None,
             mouse_right_clicked_index: None,
             scroll_handle: VirtualListScrollHandle::new(),
-            scroll_state: ScrollbarState::default(),
             reset_on_cancel: true,
             _search_task: Task::ready(()),
             _load_more_task: Task::ready(()),
@@ -431,7 +432,7 @@ where
     }
 
     fn render_list_item(
-        &self,
+        &mut self,
         ix: IndexPath,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -448,6 +449,7 @@ where
             .id(id)
             .w_full()
             .relative()
+            .overflow_hidden()
             .children(self.delegate.render_item(ix, window, cx).map(|item| {
                 item.selected(selected)
                     .secondary_selected(mouse_right_clicked)
@@ -475,7 +477,7 @@ where
     }
 
     fn render_items(
-        &self,
+        &mut self,
         items_count: usize,
         entities_count: usize,
         window: &mut Window,
@@ -484,14 +486,11 @@ where
         let rows_cache = self.rows_cache.clone();
         let scrollbar_visible = self.options.scrollbar_visible;
         let scroll_handle = self.scroll_handle.clone();
-        let scroll_state = self.scroll_state.clone();
-        let measured_size = rows_cache.measured_size();
 
         v_flex()
             .flex_grow()
             .relative()
-            .h_full()
-            .min_w(measured_size.item_size.width)
+            .size_full()
             .when_some(self.options.max_height, |this, h| this.max_h(h))
             .overflow_hidden()
             .when(items_count == 0, |this| {
@@ -528,11 +527,11 @@ where
                                                     .into_any_element(),
                                             ),
                                             RowEntry::SectionHeader(section_ix) => list
-                                                .delegate()
+                                                .delegate_mut()
                                                 .render_section_header(section_ix, window, cx)
                                                 .map(|r| r.into_any_element()),
                                             RowEntry::SectionFooter(section_ix) => list
-                                                .delegate()
+                                                .delegate_mut()
                                                 .render_section_footer(section_ix, window, cx)
                                                 .map(|r| r.into_any_element()),
                                         })
@@ -550,7 +549,7 @@ where
                 }
             })
             .when(scrollbar_visible, |this| {
-                this.child(Scrollbar::uniform_scroll(&scroll_state, &scroll_handle))
+                this.child(Scrollbar::vertical(&scroll_handle))
             })
     }
 }

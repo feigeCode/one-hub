@@ -5,7 +5,7 @@ use crate::{
     h_flex,
     input::{Input, InputState},
     menu::{ContextMenuExt, PopupMenu},
-    scroll::{ScrollableMask, Scrollbar, ScrollbarState},
+    scroll::{ScrollableMask, Scrollbar},
     v_flex, ActiveTheme, Icon, IconName, Sizable, Size, StyleSized as _, StyledExt,
     VirtualListScrollHandle,
 };
@@ -101,9 +101,7 @@ pub struct TableState<D: TableDelegate> {
     pub col_fixed: bool,
 
     pub vertical_scroll_handle: UniformListScrollHandle,
-    pub vertical_scroll_state: ScrollbarState,
     pub horizontal_scroll_handle: VirtualListScrollHandle,
-    pub horizontal_scroll_state: ScrollbarState,
 
     selected_row: Option<usize>,
     selection_state: SelectionState,
@@ -140,8 +138,6 @@ where
             col_groups: Vec::new(),
             horizontal_scroll_handle: VirtualListScrollHandle::new(),
             vertical_scroll_handle: UniformListScrollHandle::new(),
-            vertical_scroll_state: ScrollbarState::default(),
-            horizontal_scroll_state: ScrollbarState::default(),
             selection_state: SelectionState::Row,
             selected_row: None,
             right_clicked_row: None,
@@ -443,7 +439,7 @@ where
 
         // Create input state with the current value (support multiline)
         let input = cx.new(|cx| {
-            let mut state = InputState::new(window, cx).multi_line().rows(1);
+            let mut state = InputState::new(window, cx).multi_line(false);
             state.set_value(value, window, cx);
             state
         });
@@ -1573,13 +1569,7 @@ where
                 .right_0()
                 .bottom_0()
                 .w(Scrollbar::width())
-                .child(
-                    Scrollbar::uniform_scroll(
-                        &self.vertical_scroll_state,
-                        &self.vertical_scroll_handle,
-                    )
-                    .max_fps(60),
-                ),
+                .child(Scrollbar::vertical(&self.vertical_scroll_handle).max_fps(60)),
         )
     }
 
@@ -1595,10 +1585,7 @@ where
             .right_0()
             .bottom_0()
             .h(Scrollbar::width())
-            .child(Scrollbar::horizontal(
-                &self.horizontal_scroll_state,
-                &self.horizontal_scroll_handle,
-            ))
+            .child(Scrollbar::horizontal(&self.horizontal_scroll_handle))
     }
 }
 

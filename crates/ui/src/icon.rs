@@ -105,9 +105,11 @@ pub enum IconName {
     Apps,
     MongoDB,
     MySQLColor,
+    MySQLLineColor,
     PostgreSQLColor,
     MSSQLColor,
-    OracleColor
+    OracleColor,
+    Workspace,
     
 }
 
@@ -207,7 +209,9 @@ impl IconName {
             Self::MySQLColor => "icons/mysql_color.svg",
             Self::PostgreSQLColor => "icons/postgresql_color.svg",
             Self::MSSQLColor => "icons/mssql_color.svg",
+            Self::MySQLLineColor => "icons/mysql_line_color.svg",
             Self::OracleColor => "icons/oracle_color.svg",
+            Self::Workspace => "icons/workspace.svg",
         }
         .into()
     }

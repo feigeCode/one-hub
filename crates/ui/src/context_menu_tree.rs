@@ -8,7 +8,7 @@ use gpui::{
     UniformListScrollHandle, Window, Context, Render, px,
 };
 use crate::{h_flex, IconName, StyledExt};
-use crate::scroll::{Scrollbar, ScrollbarState};
+use crate::scroll::{ScrollableElement};
 use crate::tree::TreeItem;
 
 /// 创建一个支持右键菜单的树形视图
@@ -54,7 +54,6 @@ pub struct FlatTreeEntry {
 pub struct ContextMenuTreeState {
     pub focus_handle: FocusHandle,
     pub entries: Vec<FlatTreeEntry>,
-    pub scrollbar_state: ScrollbarState,
     pub scroll_handle: UniformListScrollHandle,
     pub selected_ix: Option<usize>,
     pub last_click_time: Option<Instant>,
@@ -67,7 +66,6 @@ impl ContextMenuTreeState {
         Self {
             selected_ix: None,
             focus_handle: cx.focus_handle(),
-            scrollbar_state: ScrollbarState::default(),
             scroll_handle: UniformListScrollHandle::default(),
             entries: Vec::new(),
             last_click_time: None,
@@ -299,6 +297,7 @@ impl RenderOnce for ContextMenuTree {
         let render_item = self.render_item.clone();
         let on_click = self.on_click.clone();
         let on_double_click = self.on_double_click.clone();
+        let scroll_handle = self.state.read(cx).scroll_handle.clone();
 
         div()
             .id(self.id)
@@ -392,10 +391,7 @@ impl RenderOnce for ContextMenuTree {
                     .right_0()
                     .bottom_0()
                     .w(px(12.))  // Scrollbar 宽度
-                    .child(Scrollbar::vertical(
-                        &tree_state.scrollbar_state,
-                        &tree_state.scroll_handle,
-                    )),
+                    .vertical_scrollbar(&scroll_handle)
             )
     }
 }

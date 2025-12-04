@@ -6,25 +6,25 @@ use std::time::Duration;
 
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    div, px, AnyElement, App, AppContext, Bounds, ClipboardItem, Context, Element, ElementId,
-    Entity, EntityId, FocusHandle, GlobalElementId, InspectorElementId, InteractiveElement,
-    IntoElement, KeyBinding, LayoutId, ListState, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    ParentElement, Pixels, Point, RenderOnce, SharedString, Size, StyleRefinement, Styled, Timer,
-    Window,
+    AnyElement, App, AppContext, Bounds, ClipboardItem, Context, Element, ElementId, Entity,
+    EntityId, FocusHandle, GlobalElementId, InspectorElementId, InteractiveElement, IntoElement,
+    KeyBinding, LayoutId, ListState, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement,
+    Pixels, Point, RenderOnce, SharedString, Size, StyleRefinement, Styled, Timer, Window, div, px,
 };
 use smol::stream::StreamExt;
 
 use crate::highlighter::HighlightTheme;
-use crate::scroll::{Scrollbar, ScrollbarState};
+use crate::scroll::ScrollableElement;
+use crate::text::node::CodeBlock;
+use crate::{ActiveTheme, StyledExt, v_flex};
 use crate::{
     global_state::GlobalState,
     input::{self},
     text::{
-        node::{self, NodeContext},
         TextViewStyle,
+        node::{self, NodeContext},
     },
 };
-use crate::{v_flex, ActiveTheme, StyledExt};
 
 const CONTEXT: &'static str = "TextView";
 
@@ -67,6 +67,10 @@ impl RenderOnce for TextViewElement {
     }
 }
 
+/// Type for code block actions generator function.
+pub(crate) type CodeBlockActionsFn =
+    dyn Fn(&CodeBlock, &mut Window, &mut App) -> AnyElement + Send + Sync;
+
 /// A text view that can render Markdown or HTML.
 ///
 /// ## Goals
@@ -87,10 +91,12 @@ impl RenderOnce for TextViewElement {
 pub struct TextView {
     id: ElementId,
     init_state: Option<InitState>,
+    raw: SharedString,
     state: Entity<TextViewState>,
     style: StyleRefinement,
     selectable: bool,
     scrollable: bool,
+    code_block_actions: Option<Arc<CodeBlockActionsFn>>,
 }
 
 #[derive(PartialEq)]
@@ -122,9 +128,11 @@ struct UpdateFuture {
     rx: Pin<Box<smol::channel::Receiver<Update>>>,
     tx_result: smol::channel::Sender<Result<ParsedContent, SharedString>>,
     delay: Duration,
+    code_block_actions: Option<Arc<CodeBlockActionsFn>>,
 }
 
 impl UpdateFuture {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         type_: TextViewType,
         style: TextViewStyle,
@@ -133,6 +141,7 @@ impl UpdateFuture {
         rx: smol::channel::Receiver<Update>,
         tx_result: smol::channel::Sender<Result<ParsedContent, SharedString>>,
         delay: Duration,
+        code_block_actions: Option<Arc<CodeBlockActionsFn>>,
     ) -> Self {
         Self {
             type_,
@@ -143,6 +152,7 @@ impl UpdateFuture {
             rx: Box::pin(rx),
             tx_result,
             delay,
+            code_block_actions,
         }
     }
 }
@@ -182,6 +192,7 @@ impl Future for UpdateFuture {
                         &self.current_text,
                         self.current_style.clone(),
                         &self.highlight_theme,
+                        &self.code_block_actions.clone(),
                     );
                     _ = self.tx_result.try_send(res);
                     continue;
@@ -217,7 +228,6 @@ pub(crate) struct TextViewState {
     /// Is current in selection.
     is_selecting: bool,
     is_selectable: bool,
-    scrollbar_state: ScrollbarState,
     list_state: ListState,
 }
 
@@ -233,7 +243,6 @@ impl TextViewState {
             selection_positions: (None, None),
             is_selecting: false,
             is_selectable: false,
-            scrollbar_state: ScrollbarState::default(),
             list_state: ListState::new(0, gpui::ListAlignment::Top, px(1000.)),
         }
     }
@@ -343,6 +352,14 @@ impl Text {
             Self::TextView(e) => Self::TextView(Box::new(e.style(style))),
         }
     }
+
+    /// Get the str
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::String(s) => s.as_str(),
+            Self::TextView(view) => view.raw.as_str(),
+        }
+    }
 }
 
 impl RenderOnce for Text {
@@ -403,15 +420,17 @@ impl TextView {
             cx,
         );
         if let Some(tx) = &state.read(cx).tx {
-            let _ = tx.try_send(Update::Text(markdown));
+            let _ = tx.try_send(Update::Text(markdown.clone()));
         }
         Self {
             id,
             init_state: Some(init_state),
+            raw: markdown.clone(),
             style: StyleRefinement::default(),
             state,
             selectable: false,
             scrollable: false,
+            code_block_actions: None,
         }
     }
 
@@ -432,29 +451,32 @@ impl TextView {
         let init_state =
             Self::create_init_state(TextViewType::Html, &html, &highlight_theme, &state, cx);
         if let Some(tx) = &state.read(cx).tx {
-            let _ = tx.try_send(Update::Text(html));
+            let _ = tx.try_send(Update::Text(html.clone()));
         }
         Self {
             id,
             init_state: Some(init_state),
             style: StyleRefinement::default(),
             state,
+            raw: html,
             selectable: false,
             scrollable: false,
+            code_block_actions: None,
         }
     }
 
     /// Set the source text of the text view.
     pub fn text(mut self, raw: impl Into<SharedString>) -> Self {
+        let raw: SharedString = raw.into();
         if let Some(init_state) = &mut self.init_state {
             match init_state {
-                InitState::Initializing { text, .. } => *text = raw.into(),
+                InitState::Initializing { text, .. } => *text = raw.clone(),
                 InitState::Initialized { tx } => {
-                    let _ = tx.try_send(Update::Text(raw.into()));
+                    let _ = tx.try_send(Update::Text(raw.clone()));
                 }
             }
         }
-
+        self.raw = raw;
         self
     }
 
@@ -501,6 +523,21 @@ impl TextView {
 
         cx.write_to_clipboard(ClipboardItem::new_string(selected_text.trim().to_string()));
     }
+
+    /// Set custom block actions for code blocks.
+    ///
+    /// The closure receives the [`CodeBlock`],
+    /// and returns an element to display.
+    pub fn code_block_actions<F, E>(mut self, f: F) -> Self
+    where
+        F: Fn(&CodeBlock, &mut Window, &mut App) -> E + Send + Sync + 'static,
+        E: IntoElement,
+    {
+        self.code_block_actions = Some(Arc::new(move |code_block, window, cx| {
+            f(&code_block, window, cx).into_any_element()
+        }));
+        self
+    }
 }
 
 impl IntoElement for TextView {
@@ -539,10 +576,17 @@ impl Element for TextView {
         {
             let style = *style;
             let highlight_theme = highlight_theme.clone();
+            let code_block_actions = self.code_block_actions.clone();
             let (tx, rx) = smol::channel::unbounded::<Update>();
             let (tx_result, rx_result) =
                 smol::channel::unbounded::<Result<ParsedContent, SharedString>>();
-            let parsed_result = parse_content(type_, &text, style.clone(), &highlight_theme);
+            let parsed_result = parse_content(
+                type_,
+                &text,
+                style.clone(),
+                &highlight_theme,
+                &code_block_actions,
+            );
 
             self.state.update(cx, {
                 let tx = tx.clone();
@@ -582,13 +626,13 @@ impl Element for TextView {
                 rx,
                 tx_result,
                 Duration::from_millis(200),
+                code_block_actions,
             ))
             .detach();
 
             self.init_state = Some(InitState::Initialized { tx });
         }
 
-        let scrollbar_state = &self.state.read(cx).scrollbar_state;
         let list_state = &self.state.read(cx).list_state;
 
         let focus_handle = self
@@ -618,17 +662,7 @@ impl Element for TextView {
                 state: self.state.clone(),
             })
             .refine_style(&self.style)
-            .when(self.scrollable, |this| {
-                this.child(
-                    div()
-                        .absolute()
-                        .w(Scrollbar::width())
-                        .top_0()
-                        .right_0()
-                        .bottom_0()
-                        .child(Scrollbar::vertical(scrollbar_state, list_state)),
-                )
-            })
+            .vertical_scrollbar(list_state)
             .into_any_element();
         let layout_id = el.request_layout(window, cx);
         (layout_id, el)
@@ -746,9 +780,11 @@ fn parse_content(
     text: &str,
     style: TextViewStyle,
     highlight_theme: &HighlightTheme,
+    code_block_actions: &Option<Arc<CodeBlockActionsFn>>,
 ) -> Result<ParsedContent, SharedString> {
     let mut node_cx = NodeContext {
         style: style.clone(),
+        code_block_actions: code_block_actions.clone(),
         ..NodeContext::default()
     };
 
@@ -788,7 +824,7 @@ fn selection_bounds(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::{point, px, size, Bounds};
+    use gpui::{Bounds, point, px, size};
 
     #[test]
     fn test_text_view_state_selection_bounds() {

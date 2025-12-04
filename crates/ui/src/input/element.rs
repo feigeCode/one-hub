@@ -1,20 +1,20 @@
 use std::{ops::Range, rc::Rc};
 
 use gpui::{
-    fill, point, px, relative, size, App, Bounds, Corners, Element, ElementId, ElementInputHandler,
-    Entity, GlobalElementId, Half, HighlightStyle, Hitbox, Hsla, IntoElement, LayoutId,
-    MouseButton, MouseMoveEvent, Path, Pixels, Point, ShapedLine, SharedString, Size, Style,
-    TextRun, TextStyle, UnderlineStyle, Window,
+    App, Bounds, Corners, Element, ElementId, ElementInputHandler, Entity, GlobalElementId, Half,
+    HighlightStyle, Hitbox, Hsla, IntoElement, LayoutId, MouseButton, MouseMoveEvent, Path, Pixels,
+    Point, ShapedLine, SharedString, Size, Style, TextRun, TextStyle, UnderlineStyle, Window, fill,
+    point, px, relative, size,
 };
 use ropey::Rope;
 use smallvec::SmallVec;
 
 use crate::{
-    input::{blink_cursor::CURSOR_WIDTH, text_wrapper::LineLayout, RopeExt as _},
     ActiveTheme as _, Colorize, PixelsExt, Root,
+    input::{RopeExt as _, blink_cursor::CURSOR_WIDTH, text_wrapper::LineLayout},
 };
 
-use super::{mode::InputMode, InputState, LastLayout};
+use super::{InputState, LastLayout, mode::InputMode};
 
 const BOTTOM_MARGIN_ROWS: usize = 3;
 pub(super) const RIGHT_MARGIN: Pixels = px(10.);
@@ -222,7 +222,12 @@ impl TextElement {
             }
 
             // cursor bounds
-            let cursor_height = line_height;
+            let cursor_height = match state.size {
+                crate::Size::Large => 1.,
+                crate::Size::Small => 0.75,
+                _ => 0.85,
+            } * line_height;
+
             cursor_bounds = Some(Bounds::new(
                 point(
                     bounds.left() + cursor_pos.x + line_number_width + scroll_offset.x,
@@ -562,12 +567,12 @@ impl TextElement {
         bg_segments: &[(Range<usize>, Hsla)],
         window: &mut Window,
     ) -> Vec<LineLayout> {
-        let is_multi_line = state.mode.is_multi_line();
+        let is_single_line = state.mode.is_single_line();
         let text_wrapper = &state.text_wrapper;
         let visible_range = &last_layout.visible_range;
         let visible_range_offset = &last_layout.visible_range_offset;
 
-        if !is_multi_line {
+        if is_single_line {
             let shaped_line = window.text_system().shape_line(
                 display_text.to_string().into(),
                 font_size,
@@ -652,6 +657,7 @@ impl TextElement {
     ) -> Option<Vec<(Range<usize>, HighlightStyle)>> {
         let state = self.state.read(cx);
         let text = &state.text;
+        let is_multi_line = state.mode.is_multi_line();
 
         let (highlighter, diagnostics) = match &state.mode {
             InputMode::CodeEditor {
@@ -671,8 +677,13 @@ impl TextElement {
             .skip(visible_range.start)
             .take(visible_range.len())
         {
-            // +1 for `\n`
-            let line_len = line.len() + 1;
+            let line_len = if is_multi_line {
+                // +1 for `\n`
+                line.len() + 1
+            } else {
+                line.len()
+            };
+
             let range = offset..offset + line_len;
             let line_styles = highlighter.styles(&range, &cx.theme().highlight_theme);
             styles = gpui::combine_highlights(styles, line_styles).collect();
@@ -807,6 +818,15 @@ impl Element for TextElement {
         window: &mut Window,
         cx: &mut App,
     ) -> Self::PrepaintState {
+        let style = window.text_style();
+        let font = style.font();
+        let text_size = style.font_size.to_pixels(window.rem_size());
+
+        self.state.update(cx, |state, cx| {
+            state.text_wrapper.set_font(font, text_size, cx);
+            state.text_wrapper.prepare_if_need(&state.text, cx);
+        });
+
         let state = self.state.read(cx);
         let line_height = window.line_height();
 
@@ -829,8 +849,7 @@ impl Element for TextElement {
         let text = state.text.clone();
         let is_empty = text.len() == 0;
         let placeholder = self.placeholder.clone();
-        let style = window.text_style();
-        let font_size = style.font_size.to_pixels(window.rem_size());
+
         let mut bounds = bounds;
 
         let (display_text, text_color) = if is_empty {
@@ -851,7 +870,7 @@ impl Element for TextElement {
 
         // Calculate the width of the line numbers
         let (line_number_width, line_number_len) =
-            Self::layout_line_numbers(&state, &text, font_size, &text_style, window);
+            Self::layout_line_numbers(&state, &text, text_size, &text_style, window);
 
         let wrap_width = if multi_line && state.soft_wrap {
             Some(bounds.size.width - line_number_width - RIGHT_MARGIN)
@@ -945,7 +964,7 @@ impl Element for TextElement {
             &state,
             &display_text,
             &last_layout,
-            font_size,
+            text_size,
             &runs,
             &document_colors,
             window,
@@ -961,7 +980,7 @@ impl Element for TextElement {
                 .text_system()
                 .shape_line(
                     longest_line.clone(),
-                    font_size,
+                    text_size,
                     &[TextRun {
                         len: longest_line.len(),
                         font: style.font(),
@@ -1073,7 +1092,7 @@ impl Element for TextElement {
                 sub_lines.push(
                     window
                         .text_system()
-                        .shape_line(line_no, font_size, &runs, None),
+                        .shape_line(line_no, text_size, &runs, None),
                 );
                 for _ in 0..line.wrapped_lines.len().saturating_sub(1) {
                     sub_lines.push(ShapedLine::default());

@@ -1,14 +1,15 @@
 use crate::{
+    Selectable, Sizable,
     actions::{Cancel, SelectLeft, SelectRight},
     button::{Button, ButtonVariants},
     h_flex,
     menu::PopupMenu,
-    Selectable, Sizable,
 };
 use gpui::{
-    anchored, deferred, div, prelude::FluentBuilder, px, App, AppContext as _, ClickEvent, Context,
-    DismissEvent, Entity, Focusable, InteractiveElement as _, IntoElement, KeyBinding, OwnedMenu,
-    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Subscription, Window,
+    App, AppContext as _, ClickEvent, Context, DismissEvent, Entity, Focusable,
+    InteractiveElement as _, IntoElement, KeyBinding, MouseButton, OwnedMenu, ParentElement,
+    Render, SharedString, StatefulInteractiveElement, Styled, Subscription, Window, anchored,
+    deferred, div, prelude::FluentBuilder, px,
 };
 
 const CONTEXT: &str = "AppMenuBar";
@@ -56,7 +57,7 @@ impl AppMenuBar {
         } else {
             selected_ix.saturating_sub(1)
         };
-        self.set_selected_ix(Some(new_ix), window, cx);
+        self.set_selected_index(Some(new_ix), window, cx);
     }
 
     fn on_move_right(&mut self, _: &SelectRight, window: &mut Window, cx: &mut Context<Self>) {
@@ -69,14 +70,14 @@ impl AppMenuBar {
         } else {
             selected_ix + 1
         };
-        self.set_selected_ix(Some(new_ix), window, cx);
+        self.set_selected_index(Some(new_ix), window, cx);
     }
 
     fn on_cancel(&mut self, _: &Cancel, window: &mut Window, cx: &mut Context<Self>) {
-        self.set_selected_ix(None, window, cx);
+        self.set_selected_index(None, window, cx);
     }
 
-    fn set_selected_ix(&mut self, ix: Option<usize>, _: &mut Window, cx: &mut Context<Self>) {
+    fn set_selected_index(&mut self, ix: Option<usize>, _: &mut Window, cx: &mut Context<Self>) {
         self.selected_ix = ix;
         cx.notify();
     }
@@ -188,7 +189,7 @@ impl AppMenu {
 
         _ = self.menu_bar.update(cx, |state, cx| {
             let new_ix = if is_selected { None } else { Some(self.ix) };
-            state.set_selected_ix(new_ix, window, cx);
+            state.set_selected_index(new_ix, window, cx);
         });
     }
 
@@ -203,7 +204,7 @@ impl AppMenu {
         }
 
         _ = self.menu_bar.update(cx, |state, cx| {
-            state.set_selected_ix(Some(self.ix), window, cx);
+            state.set_selected_index(Some(self.ix), window, cx);
         });
     }
 }
@@ -224,6 +225,11 @@ impl Render for AppMenu {
                     .ghost()
                     .label(self.name.clone())
                     .selected(is_selected)
+                    .on_mouse_down(MouseButton::Left, |_, window, cx| {
+                        // Stop propagation to avoid dragging the window.
+                        window.prevent_default();
+                        cx.stop_propagation();
+                    })
                     .on_click(cx.listener(Self::handle_trigger_click)),
             )
             .on_hover(cx.listener(Self::handle_hover))

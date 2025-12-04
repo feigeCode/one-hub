@@ -68,6 +68,7 @@ pub use time::{calendar, date_picker};
 #[cfg(feature = "webview")]
 pub mod webview;
 pub mod context_menu_tree;
+mod geometry;
 
 // re-export
 #[cfg(feature = "webview")]
@@ -86,7 +87,7 @@ pub use theme::*;
 pub use title_bar::*;
 pub use virtual_list::{h_virtual_list, v_virtual_list, VirtualList, VirtualListScrollHandle};
 pub use window_border::{window_border, window_paddings, WindowBorder};
-
+pub use geometry::*;
 rust_i18n::i18n!("locales", fallback = "en");
 
 /// Initialize the components.

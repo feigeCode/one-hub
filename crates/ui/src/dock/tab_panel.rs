@@ -1,15 +1,21 @@
 use std::sync::Arc;
 
-use gpui::{div, prelude::FluentBuilder, px, relative, rems, App, AppContext, Context, Corner, DismissEvent, Div, DragMoveEvent, Empty, Entity, EventEmitter, FocusHandle, Focusable, InteractiveElement as _, IntoElement, MouseButton, ParentElement, Pixels, Render, ScrollHandle, SharedString, StatefulInteractiveElement, StyleRefinement, Styled, WeakEntity, Window};
+use gpui::{
+    App, AppContext, Context, Corner, DismissEvent, Div, DragMoveEvent, Empty, Entity,
+    EventEmitter, FocusHandle, Focusable, InteractiveElement as _, IntoElement, ParentElement,
+    Pixels, Render, ScrollHandle, SharedString, StatefulInteractiveElement, StyleRefinement,
+    Styled, WeakEntity, Window, div, prelude::FluentBuilder, px, relative, rems,
+};
 use rust_i18n::t;
 
 use crate::{
+    ActiveTheme, AxisExt, IconName, Placement, Selectable, Sizable,
     button::{Button, ButtonVariants as _},
     dock::PanelInfo,
     h_flex,
     menu::{DropdownMenu, PopupMenu},
     tab::{Tab, TabBar},
-    v_flex, ActiveTheme, AxisExt, IconName, Placement, Selectable, Sizable,
+    v_flex,
 };
 
 use super::{
@@ -85,7 +91,7 @@ impl Panel for TabPanel {
         "TabPanel"
     }
 
-    fn title(&self, window: &Window, cx: &App) -> gpui::AnyElement {
+    fn title(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.active_panel(cx)
             .map(|panel| panel.title(window, cx))
             .unwrap_or("Empty Tab".into_any_element())
@@ -115,7 +121,12 @@ impl Panel for TabPanel {
         self.visible_panels(cx).next().is_some()
     }
 
-    fn dropdown_menu(&self, menu: PopupMenu, window: &Window, cx: &App) -> PopupMenu {
+    fn dropdown_menu(
+        &mut self,
+        menu: PopupMenu,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> PopupMenu {
         if let Some(panel) = self.active_panel(cx) {
             panel.dropdown_menu(menu, window, cx)
         } else {
@@ -123,7 +134,11 @@ impl Panel for TabPanel {
         }
     }
 
-    fn toolbar_buttons(&self, window: &mut Window, cx: &mut App) -> Option<Vec<Button>> {
+    fn toolbar_buttons(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Vec<Button>> {
         self.active_panel(cx)
             .and_then(|panel| panel.toolbar_buttons(window, cx))
     }
@@ -328,27 +343,10 @@ impl TabPanel {
     ) {
         panel.on_removed(window, cx);
         let panel_view = panel.view();
-        // 修改：页签新增关闭按钮
-        // ======================================开始=====================================
-        let removed_ix = self.panels.iter().position(|p| p.view() == panel_view);
-
         self.panels.retain(|p| p.view() != panel_view);
-         if self.panels.is_empty() {
-            return;
-           }
-
-         // Update active index based on which panel was removed
-         if let Some(removed_ix) = removed_ix {
-              if removed_ix == self.active_ix {
-                // If removing the active panel, activate the previous one (or first if it was the first)
-                let new_ix = removed_ix.saturating_sub(1).min(self.panels.len() - 1);
-                 self.set_active_ix(new_ix, window, cx);
-             } else if removed_ix < self.active_ix {
-                 // If removed panel was before active, shift active index down
-                  self.set_active_ix(self.active_ix.saturating_sub(1), window, cx);
-              }
-          }
-         // ======================================结束=====================================
+        if self.active_ix >= self.panels.len() {
+            self.set_active_ix(self.panels.len().saturating_sub(1), window, cx)
+        }
     }
 
     /// Check to remove self from the parent StackPanel, if there is no panel left
@@ -433,7 +431,7 @@ impl TabPanel {
     }
 
     fn render_toolbar(
-        &self,
+        &mut self,
         state: &TabState,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -492,23 +490,24 @@ impl TabPanel {
                         let zoomable = state.zoomable.map_or(false, |v| v.menu_visible());
                         let closable = state.closable;
 
-                        move |this, window, cx| {
-                            view.read(cx)
-                                .dropdown_menu(this, window, cx)
-                                .separator()
-                                .menu_with_disabled(
-                                    if zoomed {
-                                        t!("Dock.Zoom Out")
-                                    } else {
-                                        t!("Dock.Zoom In")
-                                    },
-                                    Box::new(ToggleZoom),
-                                    !zoomable,
-                                )
-                                .when(closable, |this| {
-                                    this.separator()
-                                        .menu(t!("Dock.Close"), Box::new(ClosePanel))
-                                })
+                        move |menu, window, cx| {
+                            view.update(cx, |this, cx| {
+                                this.dropdown_menu(menu, window, cx)
+                                    .separator()
+                                    .menu_with_disabled(
+                                        if zoomed {
+                                            t!("Dock.Zoom Out")
+                                        } else {
+                                            t!("Dock.Zoom In")
+                                        },
+                                        Box::new(ToggleZoom),
+                                        !zoomable,
+                                    )
+                                    .when(closable, |this| {
+                                        this.separator()
+                                            .menu(t!("Dock.Close"), Box::new(ClosePanel))
+                                    })
+                            })
                         }
                     })
                     .anchor(Corner::TopRight),
@@ -520,7 +519,7 @@ impl TabPanel {
         placement: DockPlacement,
         _: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Option<impl IntoElement> {
+    ) -> Option<Button> {
         if self.zoomed {
             return None;
         }
@@ -602,7 +601,7 @@ impl TabPanel {
     }
 
     fn render_title_bar(
-        &self,
+        &mut self,
         state: &TabState,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -612,16 +611,19 @@ impl TabPanel {
         let Some(dock_area) = self.dock_area.upgrade() else {
             return div().into_any_element();
         };
-        let panel_style = dock_area.read(cx).panel_style;
 
         let left_dock_button = self.render_dock_toggle_button(DockPlacement::Left, window, cx);
         let bottom_dock_button = self.render_dock_toggle_button(DockPlacement::Bottom, window, cx);
         let right_dock_button = self.render_dock_toggle_button(DockPlacement::Right, window, cx);
+        let has_extend_dock_button = left_dock_button.is_some() || bottom_dock_button.is_some();
 
         let is_bottom_dock = bottom_dock_button.is_some();
 
-        if self.panels.len() == 1 && panel_style == PanelStyle::Default {
-            let panel = self.panels.get(0).unwrap();
+        let panel_style = dock_area.read(cx).panel_style;
+        let visible_panels = self.visible_panels(cx).collect::<Vec<_>>();
+
+        if visible_panels.len() == 1 && panel_style == PanelStyle::default() {
+            let panel = visible_panels.get(0).unwrap();
 
             if !panel.visible(cx) {
                 return div().into_any_element();
@@ -641,19 +643,16 @@ impl TabPanel {
                 .when_some(title_style, |this, theme| {
                     this.bg(theme.background).text_color(theme.foreground)
                 })
-                .when(
-                    left_dock_button.is_some() || bottom_dock_button.is_some(),
-                    |this| {
-                        this.child(
-                            h_flex()
-                                .flex_shrink_0()
-                                .mr_1()
-                                .gap_1()
-                                .children(left_dock_button)
-                                .children(bottom_dock_button),
-                        )
-                    },
-                )
+                .when(has_extend_dock_button, |this| {
+                    this.child(
+                        h_flex()
+                            .flex_shrink_0()
+                            .mr_1()
+                            .gap_1()
+                            .children(left_dock_button)
+                            .children(bottom_dock_button),
+                    )
+                })
                 .child(
                     div()
                         .id("tab")
@@ -693,26 +692,23 @@ impl TabPanel {
         TabBar::new("tab-bar")
             .tab_item_top_offset(-px(1.))
             .track_scroll(&self.tab_bar_scroll_handle)
-            .when(
-                left_dock_button.is_some() || bottom_dock_button.is_some(),
-                |this| {
-                    this.prefix(
-                        h_flex()
-                            .items_center()
-                            .top_0()
-                            // Right -1 for avoid border overlap with the first tab
-                            .right(-px(1.))
-                            .border_r_1()
-                            .border_b_1()
-                            .h_full()
-                            .border_color(cx.theme().border)
-                            .bg(cx.theme().tab_bar)
-                            .px_2()
-                            .children(left_dock_button)
-                            .children(bottom_dock_button),
-                    )
-                },
-            )
+            .when(has_extend_dock_button, |this| {
+                this.prefix(
+                    h_flex()
+                        .items_center()
+                        .top_0()
+                        // Right -1 for avoid border overlap with the first tab
+                        .right(-px(1.))
+                        .border_r_1()
+                        .border_b_1()
+                        .h_full()
+                        .border_color(cx.theme().border)
+                        .bg(cx.theme().tab_bar)
+                        .px_2()
+                        .children(left_dock_button)
+                        .children(bottom_dock_button),
+                )
+            })
             .children(self.panels.iter().enumerate().filter_map(|(ix, panel)| {
                 let mut active = state.active_panel.as_ref() == Some(panel);
                 let droppable = self.collapsed;
@@ -725,9 +721,13 @@ impl TabPanel {
                 if self.collapsed {
                     active = false;
                 }
-                let closable = panel.closable(cx);
+
                 Some(
                     Tab::default()
+                        .when(!has_extend_dock_button && ix == 0, |this| {
+                            // Right 1px for avoid border overlap with the first tab
+                            this.right(px(1.))
+                        })
                         .map(|this| {
                             if let Some(tab_name) = panel.tab_name(cx) {
                                 this.child(tab_name)
@@ -774,38 +774,7 @@ impl TabPanel {
                                     },
                                 ))
                             })
-                        }).when(closable, |element| {
-                        // 修改：页签新增关闭按钮
-                        // ======================================开始=====================================
-                            element.child(
-                                // 关闭按钮
-                                h_flex()
-                                    .ml_2()
-                                    .w(px(16.0))
-                                    .h(px(16.0))
-                                    .justify_center()
-                                    .rounded(px(2.0))
-                                    .cursor_pointer()
-                                    .text_color(gpui::rgb(0xaaaaaa))
-                                    .hover(|style| {
-                                        style
-                                            .bg(gpui::rgb(0x5a5a5a))
-                                            .text_color(gpui::white())
-                                    })
-                                    .on_mouse_down(MouseButton::Left, {
-                                        let dock_area = self.dock_area.clone();
-                                        let panel = panel.clone();
-                                        move |_event, window, cx1| {
-                                            let panel = panel.clone();
-                                            _ = dock_area.update(cx1, |this, cx2| {
-                                                this.remove_panel(panel, DockPlacement::Center, window, cx2);
-                                            });
-                                        }
-                                    })
-                                    .child("×")
-                                // ================================结束=====================================
-                        )
-                    }),
+                        }),
                 )
             }))
             .last_empty_space(

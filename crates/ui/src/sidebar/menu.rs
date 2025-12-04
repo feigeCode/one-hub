@@ -5,13 +5,14 @@ use crate::{
 use gpui::{
     div, percentage, prelude::FluentBuilder as _, AnyElement, App, ClickEvent, ElementId,
     InteractiveElement as _, IntoElement, ParentElement as _, RenderOnce, SharedString,
-    StatefulInteractiveElement as _, Styled as _, Window,
+    StatefulInteractiveElement as _, StyleRefinement, Styled, Window,
 };
 use std::rc::Rc;
 
 /// Menu for the [`super::Sidebar`]
 #[derive(IntoElement)]
 pub struct SidebarMenu {
+    style: StyleRefinement,
     collapsed: bool,
     items: Vec<SidebarMenuItem>,
 }
@@ -20,6 +21,7 @@ impl SidebarMenu {
     /// Create a new SidebarMenu
     pub fn new() -> Self {
         Self {
+            style: StyleRefinement::default(),
             items: Vec::new(),
             collapsed: false,
         }
@@ -54,9 +56,15 @@ impl Collapsible for SidebarMenu {
     }
 }
 
+impl Styled for SidebarMenu {
+    fn style(&mut self) -> &mut StyleRefinement {
+        &mut self.style
+    }
+}
+
 impl RenderOnce for SidebarMenu {
     fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
-        v_flex().gap_2().children(
+        v_flex().gap_2().refine_style(&self.style).children(
             self.items
                 .into_iter()
                 .enumerate()
@@ -78,6 +86,7 @@ pub struct SidebarMenuItem {
     collapsed: bool,
     children: Vec<Self>,
     suffix: Option<AnyElement>,
+    disabled: bool,
 }
 
 impl SidebarMenuItem {
@@ -94,6 +103,7 @@ impl SidebarMenuItem {
             click_to_open: false,
             children: Vec::new(),
             suffix: None,
+            disabled: false,
         }
     }
 
@@ -153,6 +163,12 @@ impl SidebarMenuItem {
         self
     }
 
+    /// Set disabled flat for menu item.
+    pub fn disable(mut self, disable: bool) -> Self {
+        self.disabled = disable;
+        self
+    }
+
     /// Set id to the menu item.
     fn id(mut self, id: impl Into<ElementId>) -> Self {
         self.id = id.into();
@@ -173,6 +189,8 @@ impl RenderOnce for SidebarMenuItem {
         let handler = self.handler.clone();
         let is_collapsed = self.collapsed;
         let is_active = self.active;
+        let is_hoverable = !is_active && !self.disabled;
+        let is_disabled = self.disabled;
         let is_submenu = self.is_submenu();
         let is_open = is_submenu && !is_collapsed && *open_state.read(cx);
 
@@ -189,13 +207,11 @@ impl RenderOnce for SidebarMenuItem {
                     .gap_x_2()
                     .rounded(cx.theme().radius)
                     .text_sm()
-                    .hover(|this| {
-                        if is_active {
-                            return this;
-                        }
-
-                        this.bg(cx.theme().sidebar_accent.opacity(0.8))
-                            .text_color(cx.theme().sidebar_accent_foreground)
+                    .when(is_hoverable, |this| {
+                        this.hover(|this| {
+                            this.bg(cx.theme().sidebar_accent.opacity(0.8))
+                                .text_color(cx.theme().sidebar_accent_foreground)
+                        })
                     })
                     .when(is_active, |this| {
                         this.font_medium()
@@ -251,18 +267,23 @@ impl RenderOnce for SidebarMenuItem {
                                 )
                             })
                     })
-                    .on_click({
-                        let open_state = open_state.clone();
-                        move |ev, window, cx| {
-                            if click_to_open {
-                                open_state.update(cx, |is_open, cx| {
-                                    *is_open = true;
-                                    cx.notify();
-                                });
-                            }
+                    .when(is_disabled, |this| {
+                        this.text_color(cx.theme().muted_foreground)
+                    })
+                    .when(!is_disabled, |this| {
+                        this.on_click({
+                            let open_state = open_state.clone();
+                            move |ev, window, cx| {
+                                if click_to_open {
+                                    open_state.update(cx, |is_open, cx| {
+                                        *is_open = true;
+                                        cx.notify();
+                                    });
+                                }
 
-                            handler(ev, window, cx)
-                        }
+                                handler(ev, window, cx)
+                            }
+                        })
                     }),
             )
             .when(is_open, |this| {

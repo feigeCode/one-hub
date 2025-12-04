@@ -1,10 +1,10 @@
 use std::rc::Rc;
 
 use gpui::{
-    canvas, deferred, div, prelude::FluentBuilder, px, relative, Action, AnyElement, App,
-    AppContext, Bounds, Context, DismissEvent, Empty, Entity, EventEmitter, HighlightStyle,
-    InteractiveElement as _, IntoElement, ParentElement, Pixels, Point, Render, RenderOnce,
-    SharedString, Styled, StyledText, Subscription, Window,
+    Action, AnyElement, App, AppContext, Bounds, Context, DismissEvent, Empty, Entity,
+    EventEmitter, HighlightStyle, InteractiveElement as _, IntoElement, ParentElement, Pixels,
+    Point, Render, RenderOnce, SharedString, Styled, StyledText, Subscription, Window, canvas,
+    deferred, div, prelude::FluentBuilder, px, relative,
 };
 use lsp_types::{CompletionItem, CompletionTextEdit};
 
@@ -12,80 +12,14 @@ const MAX_MENU_WIDTH: Pixels = px(320.);
 const MAX_MENU_HEIGHT: Pixels = px(240.);
 const POPOVER_GAP: Pixels = px(4.);
 
-/// Calculate cursor offset from end of text for smart positioning.
-/// Returns Some(offset_from_end) if cursor should be repositioned, None otherwise.
-///
-/// Patterns handled:
-/// - `''` -> cursor between quotes (offset 1)
-/// - `()` -> cursor inside parentheses (offset 1)
-/// - `'%%'` -> cursor between % signs (offset 2)
-/// - `BETWEEN  AND ` -> cursor after first space (find double space)
-/// - `BETWEEN '' AND ''` -> cursor in first quotes
-fn calculate_cursor_offset(text: &str) -> Option<usize> {
-    let bytes = text.as_bytes();
-    let len = bytes.len();
-
-    if len < 2 {
-        return None;
-    }
-
-    // Check for BETWEEN pattern with double space: "BETWEEN  AND "
-    if let Some(pos) = text.find("  AND ") {
-        // Position cursor right after "BETWEEN "
-        return Some(len - pos - 1);
-    }
-
-    // Check for BETWEEN '' AND '' pattern - position in first ''
-    if text.contains("BETWEEN ''") {
-        if let Some(pos) = text.find("''") {
-            return Some(len - pos - 1);
-        }
-    }
-
-    // Check for empty quotes at end: ''
-    if len >= 2 && bytes[len - 2] == b'\'' && bytes[len - 1] == b'\'' {
-        return Some(1);
-    }
-
-    // Check for %% pattern inside quotes: '%%'
-    if len >= 4
-        && bytes[len - 1] == b'\''
-        && bytes[len - 2] == b'%'
-        && bytes[len - 3] == b'%'
-        && bytes[len - 4] == b'\''
-    {
-        return Some(2);
-    }
-
-    // Check for empty parentheses at end: ()
-    if len >= 2 && bytes[len - 2] == b'(' && bytes[len - 1] == b')' {
-        return Some(1);
-    }
-
-    // Check for pattern with comma inside parentheses: (, ) or (, , )
-    if bytes[len - 1] == b')' {
-        if let Some(open_paren) = text.rfind('(') {
-            let inside = &text[open_paren + 1..len - 1];
-            // If inside is empty or just commas/spaces, position after open paren
-            if inside.trim().is_empty() || inside.chars().all(|c| c == ',' || c == ' ') {
-                return Some(len - open_paren - 1);
-            }
-        }
-    }
-
-    None
-}
-
 use crate::{
-    actions, h_flex,
+    ActiveTheme, IndexPath, Selectable, actions, h_flex,
     input::{
-        self,
+        self, InputState, RopeExt,
         popovers::{editor_popover, render_markdown},
-        InputState, RopeExt,
     },
     label::Label,
     list::{List, ListDelegate, ListEvent, ListState},
-    ActiveTheme, IndexPath, Selectable,
 };
 
 struct ContextMenuDelegate {
@@ -201,7 +135,12 @@ impl ListDelegate for ContextMenuDelegate {
         self.items.len()
     }
 
-    fn render_item(&self, ix: crate::IndexPath, _: &mut Window, _: &mut App) -> Option<Self::Item> {
+    fn render_item(
+        &mut self,
+        ix: crate::IndexPath,
+        _: &mut Window,
+        _: &mut Context<ListState<Self>>,
+    ) -> Option<Self::Item> {
         let item = self.items.get(ix.row)?;
         Some(CompletionMenuItem::new(ix.row, item.clone()).highlight_prefix(self.query.clone()))
     }
@@ -317,23 +256,12 @@ impl CompletionMenu {
                     range = offset..offset;
                 }
 
-                // Calculate cursor offset adjustment for smart positioning
-                // Look for patterns like '', (), etc. and position cursor inside
-                let cursor_offset = calculate_cursor_offset(&new_text);
-
                 editor.replace_text_in_range_silent(
                     Some(editor.range_to_utf16(&range)),
                     &new_text,
                     window,
                     cx,
                 );
-
-                // If we have a cursor offset, move cursor to that position
-                if let Some(offset_from_end) = cursor_offset {
-                    let new_cursor_pos = range.start + new_text.len() - offset_from_end;
-                    editor.move_to(new_cursor_pos, cx);
-                }
-
                 editor.completion_inserting = false;
                 // FIXME: Input not get the focus
                 editor.focus(window, cx);
