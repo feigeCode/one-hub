@@ -157,6 +157,7 @@ impl Render for SqlResultTabContainer {
                     // Tab bar for result tabs (摘要 + individual results)
                     TabBar::new("result-tabs")
                         .w_full()
+                        .pill()
                         .with_size(Size::Small)
                         .selected_index(active_idx)
                         .on_click({

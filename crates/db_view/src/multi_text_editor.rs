@@ -49,6 +49,7 @@ impl MultiTextEditor {
         let json_editor = cx.new(|cx| {
             InputState::new(window, cx)
                 .code_editor(EditorTab::Json.language())
+                .multi_line(true)
                 .line_number(true)
                 .searchable(true)
                 .indent_guides(true)

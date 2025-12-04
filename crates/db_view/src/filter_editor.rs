@@ -585,11 +585,7 @@ pub fn create_simple_editor(
     let editor = cx.new(|cx| {
         let editor = InputState::new(window, cx)
             .code_editor(Language::from_str("sql"))
-            .rows(1)
-            .line_number(false)
-            .searchable(false)
-            .indent_guides(false)
-            .soft_wrap(false)
+            .multi_line(false)
             .placeholder(placeholder.to_string());
 
 

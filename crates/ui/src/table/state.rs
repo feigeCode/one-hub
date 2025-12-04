@@ -439,7 +439,7 @@ where
 
         // Create input state with the current value (support multiline)
         let input = cx.new(|cx| {
-            let mut state = InputState::new(window, cx).multi_line(false);
+            let mut state = InputState::new(window, cx).multi_line(true).rows(1);
             state.set_value(value, window, cx);
             state
         });

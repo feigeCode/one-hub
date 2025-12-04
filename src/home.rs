@@ -1,9 +1,9 @@
 use std::any::Any;
 
 use anyhow::Error;
-use gpui::{div, img, px, AnyElement, App, AppContext, Context, ElementId, Entity, FontWeight, Hsla, InteractiveElement, IntoElement, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Window};
+use gpui::{div, px, AnyElement, App, AppContext, Context, ElementId, Entity, FontWeight, Hsla, InteractiveElement, IntoElement, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Window};
 use gpui::prelude::FluentBuilder;
-use gpui_component::{button::Button, h_flex, input::{Input, InputEvent, InputState}, menu::PopupMenuItem, v_flex, ActiveTheme, IconName, InteractiveElementExt, Selectable, Sizable, Size, ThemeMode};
+use gpui_component::{button::{Button, ButtonVariants as _}, h_flex, input::{Input, InputEvent, InputState}, menu::PopupMenuItem, v_flex, ActiveTheme, Disableable, Icon, IconName, InteractiveElementExt, Selectable, Sizable, Size, ThemeMode, WindowExt};
 
 use one_core::storage::{ConnectionRepository, ConnectionType, DatabaseType, DbConnectionConfig, GlobalStorageState, StoredConnection, Workspace, WorkspaceRepository};
 use one_core::storage::traits::Repository;
@@ -15,12 +15,7 @@ use gpui_component::menu::DropdownMenu;
 use one_core::gpui_tokio::Tokio;
 use crate::setting_tab::SettingsTabContent;
 
-// 工作区表单事件
-#[derive(Clone)]
-enum WorkspaceFormEvent {
-    Save(String),  // 工作区名称
-    Cancel,
-}
+
 
 // HomePage Entity - 管理 home 页面的所有状态
 pub struct HomePage {
@@ -29,20 +24,17 @@ pub struct HomePage {
     connections: Vec<StoredConnection>,
     _selected_workspace_id: Option<i64>,
     tab_container: Entity<TabContainer>,
-    connection_form: Option<Entity<DbConnectionForm>>,
-    workspace_form: Option<Entity<WorkspaceForm>>,
     search_input: Entity<InputState>,
     search_query: Entity<String>,
     editing_connection_id: Option<i64>,
     selected_connection_id: Option<i64>,
+    editing_workspace_id: Option<i64>,
 }
 
 // 工作区表单组件
 struct WorkspaceForm {
     name_input: Entity<InputState>,
 }
-
-impl gpui::EventEmitter<WorkspaceFormEvent> for WorkspaceForm {}
 
 impl WorkspaceForm {
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
@@ -52,25 +44,25 @@ impl WorkspaceForm {
         
         Self { name_input }
     }
+    
+    fn with_workspace(workspace: &Workspace, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let name_input = cx.new(|cx| {
+            InputState::new(window, cx).placeholder("工作区名称")
+        });
+        
+        // 插入初始文本
+        name_input.update(cx, |input, cx| {
+            input.insert(&workspace.name, window, cx);
+        });
+        
+        Self { name_input }
+    }
 }
 
 impl gpui::Render for WorkspaceForm {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let name_input = self.name_input.clone();
-        
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()
-            .w(px(400.0))
-            .p_6()
-            .gap_4()
-            .bg(cx.theme().background)
-            .rounded(px(8.0))
-            .shadow_lg()
-            .child(
-                div()
-                    .text_xl()
-                    .font_weight(FontWeight::BOLD)
-                    .child("新建工作区")
-            )
+            .gap_3()
             .child(
                 v_flex()
                     .gap_2()
@@ -81,28 +73,6 @@ impl gpui::Render for WorkspaceForm {
                             .child("工作区名称")
                     )
                     .child(Input::new(&self.name_input).w_full())
-            )
-            .child(
-                h_flex()
-                    .gap_2()
-                    .justify_end()
-                    .child(
-                        Button::new("cancel-workspace")
-                            .label("取消")
-                            .on_click(cx.listener(|_this, _, _window, cx| {
-                                cx.emit(WorkspaceFormEvent::Cancel);
-                            }))
-                    )
-                    .child(
-                        Button::new("save-workspace")
-                            .label("保存")
-                            .on_click(cx.listener(move |_this, _, _window, cx| {
-                                let name = name_input.read(cx).text().to_string();
-                                if !name.is_empty() {
-                                    cx.emit(WorkspaceFormEvent::Save(name));
-                                }
-                            }))
-                    )
             )
     }
 }
@@ -133,12 +103,11 @@ impl HomePage {
             connections: Vec::new(),
             _selected_workspace_id: None,
             tab_container,
-            connection_form: None,
-            workspace_form: None,
             search_input,
             search_query,
             editing_connection_id: None,
             selected_connection_id: None,
+            editing_workspace_id: None,
         };
 
         // 异步加载工作区和连接列表
@@ -211,38 +180,79 @@ impl HomePage {
         }).detach();
     }
 
-    fn show_workspace_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let form = cx.new(|cx| {
-            WorkspaceForm::new(window, cx)
+    fn show_workspace_form(&mut self, workspace_id: Option<i64>, window: &mut Window, cx: &mut Context<Self>) {
+        let workspace_data = workspace_id.and_then(|id| {
+            self.workspaces.iter().find(|w| w.id == Some(id)).cloned()
         });
         
-        // 订阅表单事件
-        cx.subscribe_in(&form, window, |this, _form, event, _window, cx| {
-            match event {
-                WorkspaceFormEvent::Save(name) => {
-                    this.handle_save_workspace(name.clone(), cx);
-                }
-                WorkspaceFormEvent::Cancel => {
-                    this.workspace_form = None;
-                    cx.notify();
-                }
-            }
-        }).detach();
+        self.editing_workspace_id = workspace_id;
         
-        self.workspace_form = Some(form);
-        cx.notify();
+        let view = cx.entity().clone();
+        let is_editing = workspace_id.is_some();
+        
+        window.open_dialog(cx, move |dialog, window, cx| {
+            let form = if let Some(ref workspace) = workspace_data {
+                cx.new(|cx| WorkspaceForm::with_workspace(workspace, window, cx))
+            } else {
+                cx.new(|cx| WorkspaceForm::new(window, cx))
+            };
+            
+            let form_clone = form.clone();
+            let view_clone = view.clone();
+            let view_clone2 = view.clone();
+            
+            dialog
+                .title(if is_editing { "编辑工作区" } else { "新建工作区" })
+                .w(px(400.0))
+                .child(form)
+                .confirm()
+                .on_ok(move |_, _window, cx| {
+                    let name = form_clone.read(cx).name_input.read(cx).text().to_string();
+                    if !name.is_empty() {
+                        let _ = view_clone.update(cx, |this, cx| {
+                            this.handle_save_workspace(name, cx);
+                        });
+                        true
+                    } else {
+                        false
+                    }
+                })
+                .on_cancel(move |_, _, cx| {
+                    let _ = view_clone2.update(cx, |this, _| {
+                        this.editing_workspace_id = None;
+                    });
+                    true
+                })
+        });
     }
     
     fn handle_save_workspace(&mut self, name: String, cx: &mut Context<Self>) {
         let storage = cx.global::<GlobalStorageState>().storage.clone();
+        let editing_id = self.editing_workspace_id;
+        
+        let mut workspace = if let Some(id) = editing_id {
+            // 编辑模式：从现有工作区更新
+            let mut ws = self.workspaces.iter()
+                .find(|w| w.id == Some(id))
+                .cloned()
+                .unwrap_or_else(|| Workspace::new(name.clone()));
+            ws.name = name;
+            ws
+        } else {
+            // 新建模式
+            Workspace::new(name)
+        };
         
         let task = Tokio::spawn(cx, async move {
             let repo = storage.get::<WorkspaceRepository>().await
                 .ok_or_else(|| anyhow::anyhow!("WorkspaceRepository not found"))?;
             let pool = storage.get_pool().await?;
             
-            let mut workspace = Workspace::new(name);
-            repo.insert(&pool, &mut workspace).await?;
+            if editing_id.is_some() {
+                repo.update(&pool, &mut workspace).await?;
+            } else {
+                repo.insert(&pool, &mut workspace).await?;
+            }
             
             let result: anyhow::Result<Workspace> = Ok(workspace);
             result
@@ -254,8 +264,14 @@ impl HomePage {
                 Ok(result) => match result {
                     Ok(workspace) => {
                         _ = this.update(cx, |this, cx| {
-                            this.workspaces.push(workspace);
-                            this.workspace_form = None;
+                            if let Some(editing_id) = editing_id {
+                                if let Some(pos) = this.workspaces.iter().position(|w| w.id == Some(editing_id)) {
+                                    this.workspaces[pos] = workspace;
+                                }
+                            } else {
+                                this.workspaces.push(workspace);
+                            }
+                            this.editing_workspace_id = None;
                             cx.notify();
                         });
                     }
@@ -285,7 +301,7 @@ impl HomePage {
 
         // 设置工作区列表
         form.update(cx, |f, cx| {
-            f.set_workspaces(self.workspaces.clone(),window, cx);
+            f.set_workspaces(self.workspaces.clone(), window, cx);
         });
 
         // 如果是编辑模式，加载现有连接数据
@@ -297,25 +313,85 @@ impl HomePage {
             }
         }
 
+        let is_editing = self.editing_connection_id.is_some();
+        let title = if is_editing {
+            format!("编辑 {} 连接", db_type.as_str())
+        } else {
+            format!("新建 {} 连接", db_type.as_str())
+        };
+        
+        let form_clone = form.clone();
+        let view = cx.entity().clone();
+
         // 订阅表单事件
-        cx.subscribe_in(&form, window, |this, form, event, window, cx| {
+        cx.subscribe_in(&form, window, move |this, form, event, window, cx| {
             match event {
                 DbConnectionFormEvent::TestConnection(db_type, config) => {
                     this.handle_test_connection(form.clone(), *db_type, config.clone(), window, cx);
                 }
                 DbConnectionFormEvent::Save(db_type, config) => {
                     this.handle_save_connection(*db_type, config.clone(), window, cx);
+                    window.close_dialog(cx);
                 }
                 DbConnectionFormEvent::Cancel => {
-                    this.connection_form = None;
                     this.editing_connection_id = None;
+                    window.close_dialog(cx);
                     cx.notify();
                 }
             }
         }).detach();
-
-        self.connection_form = Some(form);
-        cx.notify();
+        
+        let title_shared: SharedString = title.into();
+        let view_clone = view.clone();
+        let form_for_footer = form.clone();
+        let form_for_test = form.clone();
+        let form_for_save = form.clone();
+        
+        window.open_dialog(cx, move |dialog, _window, _cx| {
+            let view_for_cancel = view_clone.clone();
+            let form_footer = form_for_footer.clone();
+            let form_test = form_for_test.clone();
+            let form_save = form_for_save.clone();
+            
+            dialog
+                .title(title_shared.clone())
+                .w(px(600.0))
+                .h(px(500.0))
+                .child(form_clone.clone())
+                .close_button(true)
+                .footer(move |_ok_btn, cancel_btn, window, cx| {
+                    let is_testing = form_footer.read(cx).is_testing(cx);
+                    let form_t = form_test.clone();
+                    let form_s = form_save.clone();
+                    
+                    vec![
+                        cancel_btn(window, cx),
+                        Button::new("test")
+                            .outline()
+                            .label(if is_testing { "测试中..." } else { "测试连接" })
+                            .disabled(is_testing)
+                            .on_click(window.listener_for(&form_t, |form, _, _, cx| {
+                                form.trigger_test_connection(cx);
+                            }))
+                            .into_any_element(),
+                        Button::new("save")
+                            .primary()
+                            .label("好")
+                            .disabled(is_testing)
+                            .on_click(window.listener_for(&form_s, |form, _, _, cx| {
+                                form.trigger_save(cx);
+                            }))
+                            .into_any_element(),
+                    ]
+                })
+                .on_cancel(move |_, _, cx| {
+                    let _ = view_for_cancel.update(cx, |this, cx| {
+                        this.editing_connection_id = None;
+                        cx.notify();
+                    });
+                    true
+                })
+        });
     }
 
     fn handle_test_connection(
@@ -413,7 +489,6 @@ impl HomePage {
                             } else {
                                 this.connections.push(saved_conn);
                             }
-                            this.connection_form = None;
                             this.editing_connection_id = None;
                             cx.notify();
                         });
@@ -477,7 +552,7 @@ impl HomePage {
                                     PopupMenuItem::new("工作区")
                                                 .icon(IconName::Apps)
                                                 .on_click(window.listener_for(&view, move |this, _, window, cx| {
-                                                    this.show_workspace_form(window, cx);
+                                                    this.show_workspace_form(None, window, cx);
                                                 }))
                                 ).item(
                                     PopupMenuItem::new("MySQL")
@@ -602,6 +677,48 @@ impl HomePage {
             )
     }
 
+    fn match_connection(&self, conn: &StoredConnection, query: &str) -> bool {
+        if query.is_empty() {
+            return true;
+        }
+        
+        // 匹配连接名称
+        if conn.name.to_lowercase().contains(query) {
+            return true;
+        }
+        
+        // 匹配连接参数（主机/IP、端口、用户名、数据库名）
+        if let Ok(params) = conn.to_database_params() {
+            // 主机名或 IP 地址
+            if params.host.to_lowercase().contains(query) {
+                return true;
+            }
+            
+            // 端口号（转为字符串匹配）
+            if params.port.to_string().contains(query) {
+                return true;
+            }
+            
+            // 用户名
+            if params.username.to_lowercase().contains(query) {
+                return true;
+            }
+            
+            // 数据库名
+            if params.database.as_ref().map_or(false, |db| db.to_lowercase().contains(query)) {
+                return true;
+            }
+            
+            // 完整连接字符串匹配（如 "root@localhost:3306"）
+            let conn_str = format!("{}@{}:{}", params.username, params.host, params.port);
+            if conn_str.to_lowercase().contains(query) {
+                return true;
+            }
+        }
+        
+        false
+    }
+
     fn render_content_area(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let search_query = self.search_query.read(cx).to_lowercase();
         
@@ -610,21 +727,7 @@ impl HomePage {
             .map(|ws| {
                 let conns: Vec<_> = self.connections.iter()
                     .filter(|conn| conn.workspace_id == ws.id)
-                    .filter(|conn| {
-                        if search_query.is_empty() {
-                            return true;
-                        }
-                        if conn.name.to_lowercase().contains(&search_query) {
-                            return true;
-                        }
-                        if let Ok(params) = conn.to_database_params() {
-                            params.host.to_lowercase().contains(&search_query)
-                                || params.username.to_lowercase().contains(&search_query)
-                                || params.database.as_ref().map_or(false, |db| db.to_lowercase().contains(&search_query))
-                        } else {
-                            false
-                        }
-                    })
+                    .filter(|conn| self.match_connection(conn, &search_query))
                     .cloned()
                     .collect();
                 (ws.clone(), conns)
@@ -633,21 +736,7 @@ impl HomePage {
 
         let unassigned_connections: Vec<_> = self.connections.iter()
             .filter(|conn| conn.workspace_id.is_none())
-            .filter(|conn| {
-                if search_query.is_empty() {
-                    return true;
-                }
-                if conn.name.to_lowercase().contains(&search_query) {
-                    return true;
-                }
-                if let Ok(params) = conn.to_database_params() {
-                    params.host.to_lowercase().contains(&search_query)
-                        || params.username.to_lowercase().contains(&search_query)
-                        || params.database.as_ref().map_or(false, |db| db.to_lowercase().contains(&search_query))
-                } else {
-                    false
-                }
-            })
+            .filter(|conn| self.match_connection(conn, &search_query))
             .cloned()
             .collect();
 
@@ -726,14 +815,15 @@ impl HomePage {
         let workspace_id = workspace.id;
         let workspace_name = workspace.name.clone();
         v_flex()
-            .gap_3()
+            .gap_2()
             .child(
                 h_flex()
                     .id(ElementId::Name(SharedString::from(format!("workspace-name-{}", workspace_id.unwrap()))))
                     .items_center()
                     .gap_2()
-                    .p_2()
-                    .rounded(px(8.0))
+                    .px_2()
+                    .py_1()
+                    .rounded(px(6.0))
                     .bg(muted_color)
                     .cursor_pointer()
                     .hover(|style| style.bg(accent_color.opacity(0.1)))
@@ -743,21 +833,11 @@ impl HomePage {
                         }
                     }))
                     .child(
-                        div()
-                            .w(px(32.0))
-                            .h(px(32.0))
-                            .rounded(px(6.0))
-                            .bg(accent_color)
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .text_color(gpui::white())
-                            .font_weight(FontWeight::BOLD)
-                            .child("W")
+                        Icon::new(IconName::Workspace).color()
                     )
                     .child(
                         div()
-                            .text_base()
+                            .text_sm()
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(cx.theme().foreground)
                             .child(workspace.name.clone())
@@ -768,12 +848,31 @@ impl HomePage {
                             .text_color(cx.theme().muted_foreground)
                             .child(format!("({} 个连接)", connections.len()))
                     )
+                    .child(
+                        div().flex_1()
+                    )
+                    .child(
+                        Button::new(SharedString::from(format!("edit-workspace-{}", workspace_id.unwrap_or(0))))
+                            .icon(IconName::Settings)
+                            .with_size(Size::Small)
+                            .tooltip("编辑工作区")
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                cx.stop_propagation();
+                                this.show_workspace_form(workspace_id, window, cx);
+                            }))
+                    )
+                    .child(
+                        Button::new(SharedString::from(format!("open-workspace-{}", workspace_id.unwrap_or(0))))
+                            .icon(IconName::ExternalLink)
+                            .with_size(Size::Small)
+                            .tooltip("打开工作区")
+                    )
             )
             .when(!connections.is_empty(), |this| {
                 let mut grid = div()
                     .grid()
                     .grid_cols(3)
-                    .gap_4();
+                    .gap_3();
                 
                 for conn in connections {
                     grid = grid.child(
@@ -796,15 +895,16 @@ impl HomePage {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         v_flex()
-            .gap_3()
+            .gap_2()
             .child(
                 h_flex()
                     .items_center()
                     .gap_2()
-                    .p_2()
+                    .px_2()
+                    .py_1()
                     .child(
                         div()
-                            .text_base()
+                            .text_sm()
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(cx.theme().foreground)
                             .child("未分配工作区")
@@ -820,7 +920,7 @@ impl HomePage {
                 let mut grid = div()
                     .grid()
                     .grid_cols(3)
-                    .gap_4();
+                    .gap_3();
                 
                 for conn in connections {
                     grid = grid.child(
@@ -842,112 +942,150 @@ impl HomePage {
         bg_color: Hsla,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let icon_bg = match conn.connection_type {
-            ConnectionType::Database => Hsla::blue(),
-            ConnectionType::SshSftp => accent_color,
-            ConnectionType::Redis => Hsla::red(),
-            ConnectionType::MongoDB => Hsla::green(),
-            _ => accent_color,
-        };
-
         let conn_id = conn.id;
         let clone_conn = conn.clone();
         let is_selected = selected_id == conn.id;
 
         div()
-                .id(SharedString::from(format!("conn-card-{}", conn.id.unwrap_or(0))))
-                .w_full()
-                .p_4()
-                .rounded(px(12.0))
-                .bg(bg_color)
-                .border_1()
-                .when(is_selected, |this| {
-                    this.border_color(accent_color)
-                        .bg(muted_color)
-                })
-                .when(!is_selected, |this| {
-                    this.border_color(border_color)
-                })
-                .cursor_pointer()
-                .hover(|style| {
-                    style
-                        .bg(muted_color)
-                        .border_color(accent_color)
-                })
-                .on_double_click(cx.listener(move |this, _, w, cx| {
-                    this.add_item_to_tab(&clone_conn, w, cx);
-                    cx.notify()
-                }))
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    // 单击选中
-                    this.selected_connection_id = conn_id;
-                    cx.notify();
-                }))
-                .child(
-                    h_flex()
-                        .items_center()
-                        .gap_3()
-                        .child(
-                            div()
-                                .w(px(48.0))
-                                .h(px(48.0))
-                                .rounded(px(10.0))
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .text_color(gpui::white())
-                                .font_weight(FontWeight::BOLD)
-                                .text_lg()
-                                .child(
-                                    match conn.connection_type {
-                                        ConnectionType::Database => {
-                                            conn.to_db_connection().unwrap().database_type.as_icon()
-                                        },
-                                        _ => {
-                                            IconName::Redis.color()
-                                        },
-
-                                    }
-                                )
-                        )
-                        .child(
-                            v_flex()
-                                .flex_1()
-                                .gap_1()
-                                .child(
-                                    div()
-                                        .text_base()
-                                        .font_weight(FontWeight::SEMIBOLD)
-                                        .text_color(cx.theme().foreground)
-                                        .child(conn.name.clone())
-                                )
-                                .when_some(conn.to_database_params().ok(), |this, params| {
-                                    this.child(
+            .id(SharedString::from(format!("conn-card-{}", conn.id.unwrap_or(0))))
+            .w_full()
+            .rounded(px(8.0))
+            .bg(bg_color)
+            .border_1()
+            .when(is_selected, |this| {
+                this.border_color(accent_color)
+                    .bg(muted_color)
+            })
+            .when(!is_selected, |this| {
+                this.border_color(border_color)
+            })
+            .cursor_pointer()
+            .hover(|style| {
+                style
+                    .bg(muted_color)
+                    .border_color(accent_color)
+            })
+            .on_double_click(cx.listener(move |this, _, w, cx| {
+                this.add_item_to_tab(&clone_conn, w, cx);
+                cx.notify()
+            }))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.selected_connection_id = conn_id;
+                cx.notify();
+            }))
+            .child(
+                v_flex()
+                    .w_full()
+                    .child(
+                        h_flex()
+                            .items_center()
+                            .justify_between()
+                            .p_3()
+                            .child(
+                                h_flex()
+                                    .items_center()
+                                    .gap_2()
+                                    .flex_1()
+                                    .overflow_hidden()
+                                    .child(
                                         div()
-                                            .text_xs()
-                                            .text_color(cx.theme().muted_foreground)
-                                            .child(format!("{}@{}:{}", params.username, params.host, params.port))
+                                            .w(px(48.0))
+                                            .h(px(48.0))
+                                            .rounded(px(8.0))
+                                            // .bg(icon_bg)
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
+                                            .child(
+                                                match conn.connection_type {
+                                                    ConnectionType::Database => {
+                                                        conn.to_db_connection().unwrap().database_type.as_icon()
+                                                            .with_size(px(40.0))
+                                                            .text_color(gpui::white())
+                                                    },
+                                                    _ => {
+                                                        IconName::Redis.color()
+                                                            .with_size(px(40.0))
+                                                            .text_color(gpui::white())
+                                                    },
+                                                }
+                                            )
                                     )
-                                    .when_some(params.database, |this, db| {
-                                        this.child(
-                                            div()
-                                                .text_xs()
-                                                .text_color(cx.theme().muted_foreground)
-                                                .child(format!("数据库: {}", db))
-                                        )
-                                    })
-                                })
-                        )
-                )
-        }
+                                    .child(
+                                        v_flex()
+                                            .flex_1()
+                                            .gap_0p5()
+                                            .overflow_hidden()
+                                            .child(
+                                                div()
+                                                    .text_sm()
+                                                    .font_weight(FontWeight::SEMIBOLD)
+                                                    .text_color(cx.theme().foreground)
+                                                    .child(conn.name.clone())
+                                            )
+                                            .when_some(conn.to_database_params().ok(), |this, params| {
+                                                this.child(
+                                                    div()
+                                                        .text_xs()
+                                                        .text_color(cx.theme().muted_foreground)
+                                                        .child(format!("{}@{}:{}", params.username, params.host, params.port))
+                                                )
+                                            })
+                                    )
+                            )
+                            .child(
+                                div()
+                                    .px_2()
+                                    .py_0p5()
+                                    .rounded(px(12.0))
+                                    .bg(gpui::rgb(0xFFF4E5))
+                                    .flex_shrink_0()
+                                    .child(
+                                        h_flex()
+                                            .items_center()
+                                            .gap_1()
+                                            .child(
+                                                div()
+                                                    .w(px(6.0))
+                                                    .h(px(6.0))
+                                                    .rounded(px(3.0))
+                                                    .bg(gpui::rgb(0xFF9800))
+                                            )
+                                            .child(
+                                                div()
+                                                    .text_xs()
+                                                    .text_color(gpui::rgb(0xFF9800))
+                                                    .child("连接中")
+                                            )
+                                    )
+                            )
+                    )
+                    .child(
+                        div()
+                            .w_full()
+                            .h(px(1.0))
+                            .bg(border_color)
+                    )
+                    .child(
+                        div()
+                            .px_3()
+                            .py_2()
+                            .when_some(conn.to_database_params().ok().and_then(|p| p.database), |this, db| {
+                                this.child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child(format!("数据库: {}", db))
+                                )
+                            })
+                    )
+            )
+    }
 }
 
 
 impl Render for HomePage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let form = self.connection_form.clone();
-        let workspace_form = self.workspace_form.clone();
-
         h_flex()
             .size_full()
             .child(self.render_sidebar(window, cx))
@@ -965,24 +1103,6 @@ impl Render for HomePage {
                             .child(self.render_content_area(cx))
                     )
             )
-            .when_some(form, |this, form| {
-                this.child(form)
-            })
-            .when_some(workspace_form, |this, form| {
-                // 显示工作区表单为模态对话框
-                this.child(
-                    div()
-                        .absolute()
-                        .top_0()
-                        .left_0()
-                        .size_full()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .bg(gpui::rgba(0x00000088))
-                        .child(form)
-                )
-            })
     }
 }
 

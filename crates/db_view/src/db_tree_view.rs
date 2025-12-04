@@ -413,7 +413,7 @@ impl DbTreeView {
                         });
                     }
                 }
-                DbNodeType::Connection  => {
+                DbNodeType::Connection | DbNodeType::Database => {
                     let node_id = item.id.to_string();
                     let is_expanded = self.expanded_nodes.contains(&node_id);
                     

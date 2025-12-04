@@ -334,7 +334,6 @@ impl DatabaseEventHandler {
         window: &mut Window,
         cx: &mut App,
     ) {
-        use crate::table_designer_view::TableDesignerView;
 
         let connection_id = node.connection_id.clone();
         let table = node.name.clone();
@@ -353,24 +352,24 @@ impl DatabaseEventHandler {
             let database_type = config.database_type;
             let tab_id_clone = tab_id.clone();
 
-            tab_container.update(cx, |container, cx| {
-                container.activate_or_add_tab_lazy(
-                    tab_id,
-                    move |window, cx| {
-                        let table_designer = TableDesignerView::edit_table(
-                            database_clone,
-                            table_clone,
-                            config_id,
-                            database_type,
-                            window,
-                            cx,
-                        );
-                        TabItem::new(tab_id_clone, table_designer.read(cx).clone())
-                    },
-                    window,
-                    cx,
-                );
-            });
+            // tab_container.update(cx, |container, cx| {
+            //     container.activate_or_add_tab_lazy(
+            //         tab_id,
+            //         move |window, cx| {
+            //             let table_designer = TableDesignerView::edit_table(
+            //                 database_clone,
+            //                 table_clone,
+            //                 config_id,
+            //                 database_type,
+            //                 window,
+            //                 cx,
+            //             );
+            //             TabItem::new(tab_id_clone, table_designer.read(cx).clone())
+            //         },
+            //         window,
+            //         cx,
+            //     );
+            // });
         }
     }
 
@@ -1211,28 +1210,27 @@ impl DatabaseTabContent {
                     .ghost()
                     .tooltip("新建表")
                     .on_click(move |_, window, cx| {
-                        use crate::table_designer_view::TableDesignerView;
 
-                        if let Some(conn) = first_conn.as_ref() {
-                            // 获取当前选中的数据库
-                            let current_db = db_tree_view.read(cx).get_selected_database();
-                            let database = current_db.unwrap_or_else(|| "default".to_string());
-                            if let Ok(config) = conn.to_db_connection() {
-                                let tab_id = format!("new-table-{}", Uuid::new_v4());
-
-                                tab_container.update(cx, |container, cx| {
-                                    let table_designer = TableDesignerView::new_table(
-                                        database,
-                                        config.id,
-                                        config.database_type,
-                                        window,
-                                        cx,
-                                    );
-                                    let tab = TabItem::new(tab_id, table_designer.read(cx).clone());
-                                    container.add_and_activate_tab(tab, cx);
-                                });
-                            }
-                        }
+                        // if let Some(conn) = first_conn.as_ref() {
+                        //     // 获取当前选中的数据库
+                        //     let current_db = db_tree_view.read(cx).get_selected_database();
+                        //     let database = current_db.unwrap_or_else(|| "default".to_string());
+                        //     if let Ok(config) = conn.to_db_connection() {
+                        //         let tab_id = format!("new-table-{}", Uuid::new_v4());
+                        //
+                        //         tab_container.update(cx, |container, cx| {
+                        //             let table_designer = TableDesignerView::new_table(
+                        //                 database,
+                        //                 config.id,
+                        //                 config.database_type,
+                        //                 window,
+                        //                 cx,
+                        //             );
+                        //             let tab = TabItem::new(tab_id, table_designer.read(cx).clone());
+                        //             container.add_and_activate_tab(tab, cx);
+                        //         });
+                        //     }
+                        // }
                     })
             )
     }

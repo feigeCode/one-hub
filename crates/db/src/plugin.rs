@@ -199,7 +199,7 @@ pub trait DatabasePlugin: Send + Sync {
                     .into_iter()
                     .map(|db| {
                         DbNode::new(format!("{}:{}", &node.id, db), db.clone(), DbNodeType::Database, node.id.clone())
-                            .with_children_flag(true)
+                            .with_children_flag(false)
                             .with_parent_context(id)
                     })
                     .collect())

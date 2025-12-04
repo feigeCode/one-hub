@@ -387,7 +387,7 @@ impl DbConnectionForm {
         Ok(())
     }
 
-    fn handle_test_connection(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
+    pub fn trigger_test_connection(&mut self, cx: &mut Context<Self>) {
         if let Err(e) = self.validate(cx) {
             self.test_result.update(cx, |result, cx| {
                 *result = Some(Err(e));
@@ -407,7 +407,7 @@ impl DbConnectionForm {
         cx.emit(DbConnectionFormEvent::TestConnection(db_type, connection));
     }
 
-    fn handle_save(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
+    pub fn trigger_save(&mut self, cx: &mut Context<Self>) {
         if let Err(e) = self.validate(cx) {
             self.test_result.update(cx, |result, cx| {
                 *result = Some(Err(e));
@@ -421,8 +421,12 @@ impl DbConnectionForm {
         cx.emit(DbConnectionFormEvent::Save(db_type, connection));
     }
 
-    fn handle_cancel(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
+    pub fn trigger_cancel(&mut self, cx: &mut Context<Self>) {
         cx.emit(DbConnectionFormEvent::Cancel);
+    }
+
+    pub fn is_testing(&self, cx: &App) -> bool {
+        *self.is_testing.read(cx)
     }
 
     pub fn set_test_result(&mut self, result: Result<bool, String>, cx: &mut Context<Self>) {
@@ -464,182 +468,109 @@ impl Render for DbConnectionForm {
 
         let current_tab_fields = &self.config.tab_groups[self.active_tab].fields;
 
-        // Modal overlay
-        div()
-            .absolute()
-            .inset_0()
-            .flex()
-            .items_center()
-            .justify_center()
-            .bg(gpui::rgba(0x00_00_00_40))
+        v_flex()
+            .gap_4()
+            .size_full()
             .child(
-                // Modal content
-                v_flex()
-                    .gap_4()
-                    .p_6()
-                    .w(px(600.))
-                    .bg(cx.theme().background)
-                    .border_1()
-                    .border_color(cx.theme().border)
-                    .rounded_lg()
-                    .shadow_lg()
+                // Tab bar
+                div()
+                    .flex()
+                    .justify_center()
                     .child(
-                        // Header
-                        h_flex()
-                            .relative()
-                            .items_center()
-                            .justify_center()
-                            .child(
-                                div()
-                                    .text_xl()
-                                    .font_semibold()
-                                    .text_color(cx.theme().foreground)
-                                    .child(self.config.title.clone()),
-                            )
-                            .child(
-                                div()
-                                    .absolute()
-                                    .right_0()
-                                    .child(
-                                        Button::new("close")
-                                            .ghost()
-                                            .with_size(Size::XSmall)
-                                            .label("✕")
-                                            .on_click(cx.listener(Self::handle_cancel)),
-                                    ),
-                            ),
-                    )
-                    .child(
-                        // Tab bar
-                        div()
-                            .flex()
-                            .justify_center()
-                            .child(
-                                TabBar::new("connection-tabs")
-                                    .with_size(Size::Small)
-                                    .selected_index(self.active_tab)
-                                    .on_click(cx.listener(|this, ix: &usize, _window, cx| {
-                                        this.active_tab = *ix;
-                                        cx.notify();
-                                    }))
-                                    .children(
-                                        self.config
-                                            .tab_groups
-                                            .iter()
-                                            .map(|tab| Tab::new().label(tab.label.clone())),
-                                    ),
-                            ),
-                    )
-                    .child(
-                        // Form fields for active tab
-                        div()
-                            .min_h(px(300.))
-                            .when(!current_tab_fields.is_empty(), |this| {
-                                let is_general_tab = self.active_tab == 0;
-                                
-                                this.child(
-                                    v_form()
-                                        .layout(Axis::Horizontal)
-                                        .with_size(Size::Small)
-                                        .columns(1)
-                                        .label_width(px(100.))
-                                        .children(
-                                            current_tab_fields
-                                                .iter()
-                                                .enumerate()
-                                                .map(|(i, field_info)| {
-                                                    let input_idx = field_input_offset + i;
-                                                    field()
-                                                        .label(field_info.label.clone())
-                                                        .required(field_info.required)
-                                                        .items_center()
-                                                        .label_justify_end()
-                                                        .child(Input::new(&self.field_inputs[input_idx]).w_full())
-                                                }),
-                                        )
-                                        .when(is_general_tab, |form| {
-                                            form.child(
-                                                field()
-                                                    .label("工作区")
-                                                    .items_center()
-                                                    .label_justify_end()
-                                                    .child(Select::new(&self.workspace_select).w_full())
-                                            )
-                                        }),
-                                )
-                            })
-                            .when(current_tab_fields.is_empty(), |this| {
-                                this.child(
-                                    div()
-                                        .flex()
-                                        .items_center()
-                                        .justify_center()
-                                        .h_full()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .child("此页签暂无配置项"),
-                                )
-                            }),
-                    )
-                    .child(
-                        // Test result message area (fixed height)
-                        div()
-                            .h(px(48.))
-                            .flex()
-                            .items_center()
-                            .when_some(test_result_msg, |this, msg| {
-                                let is_success = msg.starts_with("✓");
-                                this.child(
-                                    div()
-                                        .w_full()
-                                        .p_3()
-                                        .rounded_md()
-                                        .bg(if is_success {
-                                            gpui::rgb(0xdcfce7)
-                                        } else {
-                                            gpui::rgb(0xfee2e2)
-                                        })
-                                        .text_color(if is_success {
-                                            gpui::rgb(0x166534)
-                                        } else {
-                                            gpui::rgb(0x991b1b)
-                                        })
-                                        .child(msg),
-                                )
-                            }),
-                    )
-                    .child(
-                        // Action buttons
-                        h_flex()
-                            .gap_2()
-                            .justify_end()
-                            .child(
-                                Button::new("cancel")
-                                    .ghost()
-                                    .with_size(Size::Medium)
-                                    .label("取消")
-                                    .on_click(cx.listener(Self::handle_cancel)),
-                            )
-                            .child(
-                                Button::new("test")
-                                    .outline()
-                                    .with_size(Size::Medium)
-                                    .label(if is_testing {
-                                        "测试中..."
-                                    } else {
-                                        "测试连接"
-                                    })
-                                    .disabled(is_testing)
-                                    .on_click(cx.listener(Self::handle_test_connection)),
-                            )
-                            .child(
-                                Button::new("save")
-                                    .primary()
-                                    .with_size(Size::Medium)
-                                    .label("好")
-                                    .disabled(is_testing)
-                                    .on_click(cx.listener(Self::handle_save)),
+                        TabBar::new("connection-tabs")
+                            .with_size(Size::Large)
+                            .underline()
+                            .selected_index(self.active_tab)
+                            .on_click(cx.listener(|this, ix: &usize, _window, cx| {
+                                this.active_tab = *ix;
+                                cx.notify();
+                            }))
+                            .children(
+                                self.config
+                                    .tab_groups
+                                    .iter()
+                                    .map(|tab| Tab::new().label(tab.label.clone())),
                             ),
                     ),
+            )
+            .child(
+                // Form fields for active tab
+                div()
+                    .flex_1()
+                    .min_h(px(250.))
+                    .when(!current_tab_fields.is_empty(), |this| {
+                        let is_general_tab = self.active_tab == 0;
+
+                        this.child(
+                            v_form()
+                                .layout(Axis::Horizontal)
+                                .with_size(Size::Small)
+                                .columns(1)
+                                .label_width(px(80.))
+                                .children(
+                                    current_tab_fields
+                                        .iter()
+                                        .enumerate()
+                                        .map(|(i, field_info)| {
+                                            let input_idx = field_input_offset + i;
+                                            field()
+                                                .label(field_info.label.clone())
+                                                .required(field_info.required)
+                                                .items_center()
+                                                .label_justify_end()
+                                                .child(Input::new(&self.field_inputs[input_idx]).w_full())
+                                        }),
+                                )
+                                .when(is_general_tab, |form| {
+                                    form.child(
+                                        field()
+                                            .label("工作区")
+                                            .items_center()
+                                            .label_justify_end()
+                                            .child(Select::new(&self.workspace_select).w_full())
+                                    )
+                                }),
+                        )
+                    })
+                    .when(current_tab_fields.is_empty(), |this| {
+                        this.child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .h_full()
+                                .text_color(cx.theme().muted_foreground)
+                                .child("此页签暂无配置项"),
+                        )
+                    }),
+            )
+            .child(
+                // Test result message area
+                div()
+                    .h(px(40.))
+                    .flex()
+                    .items_center()
+                    .when_some(test_result_msg, |this, msg| {
+                        let is_success = msg.starts_with("✓");
+                        this.child(
+                            div()
+                                .w_full()
+                                .px_3()
+                                .py_2()
+                                .rounded_md()
+                                .bg(if is_success {
+                                    gpui::rgb(0xdcfce7)
+                                } else {
+                                    gpui::rgb(0xfee2e2)
+                                })
+                                .text_color(if is_success {
+                                    gpui::rgb(0x166534)
+                                } else {
+                                    gpui::rgb(0x991b1b)
+                                })
+                                .child(msg),
+                        )
+                    }),
             )
     }
 }
