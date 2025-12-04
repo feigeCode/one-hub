@@ -2,14 +2,7 @@ use one_core::storage::StoredConnection;
 use std::collections::{HashMap, HashSet};
 use gpui::{App, AppContext, Context, Entity, IntoElement, InteractiveElement, ParentElement, Render, Styled, Window, div, StatefulInteractiveElement, EventEmitter, SharedString, Focusable, FocusHandle};
 use tracing::log::trace;
-use gpui_component::{
-    ActiveTheme, IconName,
-    h_flex,
-    list::ListItem,
-    menu::{ContextMenuExt, PopupMenuItem},
-    tree::TreeItem,
-    v_flex,
-};
+use gpui_component::{ActiveTheme, IconName, h_flex, list::ListItem, menu::{ContextMenuExt, PopupMenuItem}, tree::TreeItem, v_flex, Icon, Sizable, Size};
 use db::{GlobalDbState, DbNode, DbNodeType, spawn_result};
 use gpui_component::context_menu_tree::{context_menu_tree, ContextMenuTreeState};
 // ============================================================================
@@ -374,27 +367,27 @@ impl DbTreeView {
     }
 
     /// 根据节点类型获取图标
-    fn get_icon_for_node(&self, node_id: &str, is_expanded: bool) -> IconName {
+    fn get_icon_for_node(&self, node_id: &str, is_expanded: bool, cx: &mut Context<Self>) -> Icon {
         let node = self.db_nodes.get(node_id);
         match node.map(|n| &n.node_type) {
-            Some(DbNodeType::Connection) => IconName::Folder,
-            Some(DbNodeType::Database) => IconName::Database,
+            Some(DbNodeType::Connection) => Icon::from(IconName::MySQLLineColor.color().with_size(Size::Large)),
+            Some(DbNodeType::Database) => Icon::from(IconName::Database).text_color(cx.theme().primary),
             Some(DbNodeType::TablesFolder) | Some(DbNodeType::ViewsFolder) |
             Some(DbNodeType::FunctionsFolder) | Some(DbNodeType::ProceduresFolder) |
             Some(DbNodeType::TriggersFolder) | Some(DbNodeType::SequencesFolder) => {
-                if is_expanded { IconName::FolderOpen } else { IconName::Folder }
+                if is_expanded { Icon::new(IconName::FolderOpen).text_color(cx.theme().primary) } else { Icon::from(IconName::Folder).text_color(cx.theme().primary) }
             }
-            Some(DbNodeType::Table) => IconName::Table,
-            Some(DbNodeType::View) => IconName::Table,
-            Some(DbNodeType::Function) | Some(DbNodeType::Procedure) => IconName::Settings,
-            Some(DbNodeType::Column) => IconName::Column,
+            Some(DbNodeType::Table) => Icon::from(IconName::Table).text_color(cx.theme().primary),
+            Some(DbNodeType::View) => Icon::from(IconName::Table),
+            Some(DbNodeType::Function) | Some(DbNodeType::Procedure) => Icon::from(IconName::Settings),
+            Some(DbNodeType::Column) => Icon::from(IconName::Column).text_color(cx.theme().primary),
             Some(DbNodeType::ColumnsFolder) | Some(DbNodeType::IndexesFolder) => {
-                if is_expanded { IconName::FolderOpen } else { IconName::Folder }
+                if is_expanded { Icon::from(IconName::FolderOpen).text_color(cx.theme().primary) } else { Icon::from(IconName::Folder).text_color(cx.theme().primary) }
             }
-            Some(DbNodeType::Index) => IconName::Settings,
-            Some(DbNodeType::Trigger) => IconName::Settings,
-            Some(DbNodeType::Sequence) => IconName::ArrowRight,
-            _ => IconName::File,
+            Some(DbNodeType::Index) => Icon::from(IconName::Settings),
+            Some(DbNodeType::Trigger) => Icon::from(IconName::Settings),
+            Some(DbNodeType::Sequence) => Icon::from(IconName::ArrowRight),
+            _ => Icon::from(IconName::File),
         }
     }
 
@@ -549,8 +542,8 @@ impl Render for DbTreeView {
                                     &self.tree_state,
                                     move |ix, item, _depth, _selected, _window, cx| {
                                         let node_id = item.id.to_string();
-                                        let (icon, label_text, _item_clone) = view.update(cx, |this, _cx| {
-                                            let icon = this.get_icon_for_node(&node_id, item.is_expanded());
+                                        let (icon, label_text, _item_clone) = view.update(cx, |this, cx| {
+                                            let icon = this.get_icon_for_node(&node_id, item.is_expanded(),cx);
 
                                             // 同步节点展开状态
                                             if item.is_expanded() {

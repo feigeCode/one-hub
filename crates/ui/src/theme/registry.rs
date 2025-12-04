@@ -10,7 +10,7 @@ use std::{
     sync::{Arc, LazyLock},
 };
 
-const DEFAULT_THEME: &str = include_str!("./default-theme.json");
+const DEFAULT_THEME: &str = include_str!("./macos-classic.json");
 pub(crate) static DEFAULT_THEME_COLORS: LazyLock<
     HashMap<ThemeMode, (Arc<ThemeColor>, Arc<HighlightTheme>)>,
 > = LazyLock::new(|| {
