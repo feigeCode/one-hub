@@ -1,14 +1,22 @@
+use one_core::gpui_tokio::Tokio;
 use crate::sql_editor::SqlEditor;
 use crate::sql_result_tab::SqlResultTabContainer;
 use one_core::tab_container::{TabContent, TabContentType};
 use db::{ExecOptions, GlobalDbState};
-use gpui::{div, px, AnyElement, App, AppContext, ClickEvent, Entity, FocusHandle, Focusable, IntoElement, ParentElement, SharedString, Styled, Window};
+use gpui::{div, px, AnyElement, App, AppContext, AsyncApp, ClickEvent, Entity, EventEmitter, FocusHandle, Focusable, IntoElement, ParentElement, SharedString, Styled, Window};
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::resizable::{resizable_panel, v_resizable};
 use gpui_component::select::{SearchableVec, Select, SelectState};
 use gpui_component::{h_flex, v_flex, ActiveTheme, IconName, Sizable, Size};
 use std::any::Any;
 use std::sync::{Arc, RwLock};
+
+// Events emitted by SqlEditorTabContent
+#[derive(Debug, Clone)]
+pub enum SqlEditorEvent {
+    /// Query was saved successfully
+    QuerySaved { connection_id: String, database: Option<String> },
+}
 
 pub struct SqlEditorTabContent {
     title: SharedString,
@@ -21,6 +29,8 @@ pub struct SqlEditorTabContent {
     database_select: Entity<SelectState<SearchableVec<String>>>,
     // Add focus handle
     focus_handle: FocusHandle,
+    // Callback to refresh queries folder when a query is saved
+    on_query_saved: Option<Arc<dyn Fn(&mut App) + Send + Sync>>,
 }
 
 impl SqlEditorTabContent {
@@ -64,6 +74,7 @@ impl SqlEditorTabContent {
             current_database: current_database.clone(),
             database_select: database_select.clone(),
             focus_handle,
+            on_query_saved: None,  // Initialize as None, can be set later
         };
 
         // Subscribe to select events for database switching
@@ -109,9 +120,93 @@ impl SqlEditorTabContent {
         instance
     }
 
+    // Create a new instance that loads a specific query by ID
+    pub fn new_with_query_id(
+        query_id: i64,
+        title: impl Into<SharedString>,
+        connection_id: impl Into<String>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Self {
+        let instance = Self::new_with_config(title, connection_id, None, window, cx);
+
+        // Load the query content asynchronously
+        let editor = instance.editor.clone();
+        let status_msg = instance.status_msg.clone();
+        let current_database = instance.current_database.clone();
+        let storage_manager = cx.global::<one_core::storage::GlobalStorageState>().storage.clone();
+
+        cx.spawn(async move |cx: &mut AsyncApp| {
+            use one_core::storage::traits::Repository;
+
+            // Load query from database
+            let result = Tokio::block_on(cx, async move {
+                let query_repo = storage_manager.get::<one_core::storage::query_repository::QueryRepository>().await
+                    .ok_or_else(|| anyhow::anyhow!("Query repository not found"))?;
+                let pool = storage_manager.get_pool().await?;
+                query_repo.get(&pool, query_id).await
+            }).unwrap();
+
+            // Update UI with loaded query
+            cx.update(|cx| {
+                if let Some(window_id) = cx.active_window() {
+                    let _ = cx.update_window(window_id, |_entity, window, cx| {
+                        match result {
+                            Ok(Some(query)) => {
+                                // Set SQL content
+                                editor.update(cx, |e, cx| {
+                                    e.set_value(query.content.clone(), window, cx);
+                                });
+
+                                // Update current database
+                                if let Some(db) = query.database_name {
+                                    *current_database.write().unwrap() = Some(db);
+                                }
+
+                                // Update status message
+                                status_msg.update(cx, |msg, cx| {
+                                    *msg = format!("Query '{}' loaded successfully", query.name);
+                                    cx.notify();
+                                });
+                            }
+                            Ok(None) => {
+                                status_msg.update(cx, |msg, cx| {
+                                    *msg = format!("Query with ID {} not found", query_id);
+                                    cx.notify();
+                                });
+                            }
+                            Err(e) => {
+                                status_msg.update(cx, |msg, cx| {
+                                    *msg = format!("Error loading query: {}", e);
+                                    cx.notify();
+                                });
+                            }
+                        }
+                    });
+                }
+            }).ok();
+
+            Ok::<(), anyhow::Error>(())
+        }).detach();
+
+        instance
+    }
+    
+    // Get editor and status_msg for loading query - caller should spawn the async task
+    pub fn get_load_query_handles(&self) -> (Entity<SqlEditor>, Entity<String>) {
+        (self.editor.clone(), self.status_msg.clone())
+    }
+
     pub fn set_sql(&self, sql: String, window: &mut Window, cx: &mut App) {
         self.editor.update(cx, |e, cx| e.set_value(sql, window, cx));
     }
+
+    /// Set callback to be called when a query is saved
+    pub fn set_on_query_saved(&mut self, callback: impl Fn(&mut App) + Send + Sync + 'static) {
+        self.on_query_saved = Some(Arc::new(callback));
+    }
+
+
 
     /// Load databases into the select dropdown
     fn load_databases_async(&self, cx: &mut App) {
@@ -364,6 +459,74 @@ c.data_type,
         self.editor
             .update(cx, |s, cx| s.set_value(formatted, window, cx));
     }
+
+    fn handle_save_query(&self, _: &ClickEvent, _window: &mut Window, cx: &mut App) {
+        use one_core::storage::query_model::Query;
+        use one_core::storage::traits::Repository;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let sql = self.get_sql_text(cx);
+        let connection_id = self.connection_id.clone();
+        let status_msg = self.status_msg.clone();
+        let storage_manager = cx.global::<one_core::storage::GlobalStorageState>().storage.clone();
+        let current_db = self.current_database.read().unwrap().clone();
+        let on_query_saved = self.on_query_saved.clone();  // Clone the callback
+
+        // Generate a default name for the query
+        let start = SystemTime::now();
+        let since_epoch = start.duration_since(UNIX_EPOCH)
+            .expect("Time went backwards");
+        let query_name = format!("Query_{}", since_epoch.as_secs());
+
+        // Create the query object
+        let mut query = Query::new(
+            query_name,
+            sql,
+            connection_id,
+            current_db
+        );
+
+        // Spawn the async task
+        cx.spawn(async move |cx: &mut AsyncApp| {
+            // Run SQLx operations in Tokio runtime
+            // Use tokio::task::block_in_place to run async code synchronously within an async context
+            let result = Tokio::block_on(cx, async move {
+                // Get the query repository
+                let query_repo = storage_manager.get::<one_core::storage::query_repository::QueryRepository>().await.ok_or_else(|| anyhow::anyhow!("Query repository not found"))?;
+
+                // Save the query to the database
+                let pool = storage_manager.get_pool().await?;
+                query_repo.insert(&pool, &mut query).await?;
+
+                // Return the query ID
+                Ok::<Option<i64>, anyhow::Error>(query.id)
+            });
+
+            // Update status message and call callback if save was successful
+            cx.update(|cx| {
+                if let Some(window_id) = cx.active_window() {
+                    let _ = cx.update_window(window_id, |_entity, _window, cx| {
+                        status_msg.update(cx, |msg, cx| {
+                            match &result {
+                                Ok(query_id) => {
+                                    *msg = format!("Query saved successfully with ID: {:?}", query_id);
+
+                                    // Call the callback to refresh the queries folder
+                                    if let Some(callback) = on_query_saved {
+                                        callback(cx);
+                                    }
+                                }
+                                Err(e) => *msg = format!("Error saving query: {}", e),
+                            };
+                            cx.notify();
+                        });
+                    });
+                }
+            }).ok();
+
+            Ok::<(), anyhow::Error>(())
+        }).detach();
+    }
 }
 
 
@@ -447,6 +610,17 @@ impl TabContent for SqlEditorTabContent {
                                             }),
                                     )
                                     .child(
+                                        Button::new("save-query")
+                                            .with_size(Size::Small)
+                                            .ghost()
+                                            .label("Save Query")
+                                            .icon(IconName::Plus)
+                                            .on_click({
+                                                let this = self.clone();
+                                                move |e, w, cx| this.handle_save_query(e, w, cx)
+                                            }),
+                                    )
+                                    .child(
                                         Button::new("compress-query")
                                             .with_size(Size::Small)
                                             .ghost()
@@ -518,6 +692,7 @@ impl Clone for SqlEditorTabContent {
             current_database: self.current_database.clone(),
             database_select: self.database_select.clone(),
             focus_handle: self.focus_handle.clone(),
+            on_query_saved: self.on_query_saved.clone(),
         }
     }
 }
@@ -527,3 +702,5 @@ impl Focusable for SqlEditorTabContent {
         self.focus_handle.clone()
     }
 }
+
+impl EventEmitter<SqlEditorEvent> for SqlEditorTabContent {}

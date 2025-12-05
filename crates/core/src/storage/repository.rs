@@ -1,9 +1,10 @@
-use anyhow::Result;
+use anyhow::{Error, Result};
 use async_trait::async_trait;
 use gpui::{App, SharedString};
 use sqlx::{Row, SqlitePool};
 use crate::gpui_tokio::Tokio;
 use crate::storage::{traits::Repository, StoredConnection};
+use crate::storage::query_repository::QueryRepository;
 
 /// Repository for StoredConnection
 #[derive(Clone)]
@@ -366,16 +367,17 @@ pub fn init(cx: &mut App) {
     let storage_state = cx.global::<GlobalStorageState>();
     let conn_repo = ConnectionRepository::new();
     let workspace_repo = WorkspaceRepository::new();
-    
+    let query_repo = QueryRepository::new();
+    let storage = storage_state.storage.clone();
+
     let result: Result<()> = Tokio::block_on(cx, async move {
-        let pool = storage_state.storage.get_pool().await?;
-        
+        let pool = storage.get_pool().await?;
         workspace_repo.create_table(&pool).await?;
-        storage_state.storage.register(workspace_repo).await?;
-        
+        storage.register(workspace_repo).await?;
         conn_repo.create_table(&pool).await?;
-        storage_state.storage.register(conn_repo).await?;
-        
+        storage.register(conn_repo).await?;
+        query_repo.create_table(&pool).await?;
+        storage.register(query_repo).await?;
         Ok(())
     });
     if let Err(e) = result {

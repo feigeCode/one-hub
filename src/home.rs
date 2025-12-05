@@ -1,7 +1,7 @@
 use std::any::Any;
 
 use anyhow::Error;
-use gpui::{div, px, AnyElement, App, AppContext, Context, ElementId, Entity, FontWeight, Hsla, InteractiveElement, IntoElement, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Window};
+use gpui::{div, px, AnyElement, App, AppContext, Context, ElementId, Entity, FocusHandle, Focusable, FontWeight, Hsla, InteractiveElement, IntoElement, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Window};
 use gpui::prelude::FluentBuilder;
 use gpui_component::{button::{Button, ButtonVariants as _}, h_flex, input::{Input, InputEvent, InputState}, menu::PopupMenuItem, v_flex, ActiveTheme, Disableable, Icon, IconName, InteractiveElementExt, Selectable, Sizable, Size, ThemeMode, WindowExt};
 
@@ -33,29 +33,41 @@ pub struct HomePage {
 
 // 工作区表单组件
 struct WorkspaceForm {
+    focus_handle: FocusHandle,
     name_input: Entity<InputState>,
 }
 
 impl WorkspaceForm {
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let focus_handle = cx.focus_handle();
         let name_input = cx.new(|cx| {
             InputState::new(window, cx).placeholder("工作区名称")
         });
         
-        Self { name_input }
+        Self { 
+            focus_handle, 
+            name_input,
+        }
     }
     
     fn with_workspace(workspace: &Workspace, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let focus_handle = cx.focus_handle();
         let name_input = cx.new(|cx| {
-            InputState::new(window, cx).placeholder("工作区名称")
+            let mut input_state = InputState::new(window, cx).placeholder("工作区名称");
+            input_state.set_value(workspace.name.clone(), window, cx);
+            input_state
         });
         
-        // 插入初始文本
-        name_input.update(cx, |input, cx| {
-            input.insert(&workspace.name, window, cx);
-        });
-        
-        Self { name_input }
+        Self { 
+            focus_handle, 
+            name_input,
+        }
+    }
+}
+
+impl Focusable for WorkspaceForm {
+    fn focus_handle(&self, _cx: &App) -> FocusHandle {
+        self.focus_handle.clone()
     }
 }
 

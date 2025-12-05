@@ -1,7 +1,7 @@
 use std::rc::Rc;
 
 use anyhow::Result;
-use gpui::{px, App, AppContext, Context, Div, Entity, IntoElement, ParentElement, Render, Styled as _, Task, Window};
+use gpui::{App, AppContext, Context, Div, Entity, IntoElement, ParentElement, Render, Styled as _, Task, Window};
 use gpui_component::highlighter::Language;
 use gpui_component::input::{CompletionProvider, Input, InputState};
 use gpui_component::{ActiveTheme, Rope, RopeExt};

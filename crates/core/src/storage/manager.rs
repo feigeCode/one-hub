@@ -25,6 +25,14 @@ pub struct  GlobalStorageState {
 
 impl Global for GlobalStorageState {}
 
+impl Clone for GlobalStorageState {
+    fn clone(&self) -> Self {
+        GlobalStorageState {
+            storage: self.storage.clone(),
+        }
+    }
+}
+
 impl StorageManager {
     /// Create a new storage manager
     pub async fn new() -> Result<Self> {

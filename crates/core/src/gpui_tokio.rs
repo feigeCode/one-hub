@@ -6,10 +6,10 @@
 
 use std::future::Future;
 
-use gpui::{App, AppContext, Global, ReadGlobal, Task};
+use gpui::{App, AppContext, AsyncApp, Global, ReadGlobal, Task};
 
 pub use tokio::task::JoinError;
-
+use gpui_component::highlighter::Language::C;
 
 pub struct Deferred<F: FnOnce()>(Option<F>);
 
@@ -60,12 +60,14 @@ impl GlobalTokio {
 pub struct Tokio {}
 
 impl Tokio {
-
+    
     /// Runs an async future synchronously using Tokio's runtime.
     /// This blocks the current thread until the future completes.
-    pub fn block_on<F, R>(cx: &App, f: F) -> R
+    pub fn block_on<C,Fut, R>(cx: &C, f: Fut) -> C::Result<R>
     where
-        F: Future<Output = R>,
+        C: AppContext,
+        Fut: Future<Output = R> + Send + 'static,
+        R: Send + 'static,
     {
         cx.read_global(|tokio: &GlobalTokio, _| {
             let handle = tokio.runtime.handle().clone();

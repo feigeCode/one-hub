@@ -97,3 +97,6 @@ cargo run
 3. Database operations are dispatched through the DB manager
 4. State changes are propagated through GPUI context
 5. UI updates occur reactively based on state changes
+
+## Recent Changes
+- 001-query-nodes-feature: Added [if applicable, e.g., PostgreSQL, CoreData, files or N/A]

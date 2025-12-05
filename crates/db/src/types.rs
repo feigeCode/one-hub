@@ -36,6 +36,8 @@ pub enum DbNodeType {
     Trigger,
     SequencesFolder,
     Sequence,
+    QueriesFolder,
+    NamedQuery,
 }
 
 impl fmt::Display for DbNodeType {
@@ -59,6 +61,8 @@ impl fmt::Display for DbNodeType {
             DbNodeType::Trigger => write!(f, "Trigger"),
             DbNodeType::SequencesFolder => write!(f, "Sequences"),
             DbNodeType::Sequence => write!(f, "Sequence"),
+            DbNodeType::QueriesFolder => write!(f, "Queries"),
+            DbNodeType::NamedQuery => write!(f, "Query"),
         }
     }
 }

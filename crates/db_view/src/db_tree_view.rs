@@ -1,10 +1,11 @@
-use one_core::storage::StoredConnection;
+use one_core::storage::{GlobalStorageState, StoredConnection};
 use std::collections::{HashMap, HashSet};
-use gpui::{App, AppContext, Context, Entity, IntoElement, InteractiveElement, ParentElement, Render, Styled, Window, div, StatefulInteractiveElement, EventEmitter, SharedString, Focusable, FocusHandle};
+use gpui::{App, AppContext, Context, Entity, IntoElement, InteractiveElement, ParentElement, Render, Styled, Window, div, StatefulInteractiveElement, EventEmitter, SharedString, Focusable, FocusHandle, AsyncApp};
 use tracing::log::trace;
 use gpui_component::{ActiveTheme, IconName, h_flex, list::ListItem, menu::{ContextMenuExt, PopupMenuItem}, tree::TreeItem, v_flex, Icon, Sizable, Size};
-use db::{GlobalDbState, DbNode, DbNodeType, spawn_result};
+use db::{GlobalDbState, DbNode, DbNodeType, spawn_result, DbError};
 use gpui_component::context_menu_tree::{context_menu_tree, ContextMenuTreeState};
+use one_core::gpui_tokio::Tokio;
 // ============================================================================
 // DbTreeView Events
 // ============================================================================
@@ -20,6 +21,12 @@ pub enum DbTreeViewEvent {
     OpenTableStructure { node: DbNode },
     /// 为指定数据库创建新查询
     CreateNewQuery { node: DbNode },
+    /// 打开命名查询
+    OpenNamedQuery { node: DbNode },
+    /// 重命名查询
+    RenameQuery { node: DbNode },
+    /// 删除查询
+    DeleteQuery { node: DbNode },
     /// 节点被选中（用于更新 objects panel）
     NodeSelected { node: DbNode },
     /// 导入数据
@@ -217,17 +224,19 @@ impl DbTreeView {
         cx.notify();
 
         let global_state = cx.global::<GlobalDbState>().clone();
+        let global_storage_state = cx.global::<GlobalStorageState>().clone();
         let clone_node_id = node_id.clone();
         let connection_id = node.connection_id.clone();
-        cx.spawn(async move |this, cx| {
+        
+        cx.spawn(async move |this, cx: &mut AsyncApp| {
+
             // 使用 DatabasePlugin 的方法加载子节点
-            let children_result = spawn_result(async move {
+            let children_result = Tokio::block_on(cx,async move {
                 let (plugin, conn_arc) = global_state.get_plugin_and_connection(&connection_id).await?;
                 let conn = conn_arc.read().await;
-
                 // 加载子节点并返回结果
-                plugin.load_node_children(&**conn, &node).await
-            }).await;
+                plugin.load_node_children(&**conn, &node, &global_storage_state).await
+            }).unwrap();
 
             this.update(cx, |this: &mut Self, cx| {
                 // 移除加载状态
@@ -374,7 +383,8 @@ impl DbTreeView {
             Some(DbNodeType::Database) => Icon::from(IconName::Database).text_color(cx.theme().primary),
             Some(DbNodeType::TablesFolder) | Some(DbNodeType::ViewsFolder) |
             Some(DbNodeType::FunctionsFolder) | Some(DbNodeType::ProceduresFolder) |
-            Some(DbNodeType::TriggersFolder) | Some(DbNodeType::SequencesFolder) => {
+            Some(DbNodeType::TriggersFolder) | Some(DbNodeType::SequencesFolder) |
+            Some(DbNodeType::QueriesFolder) => {
                 if is_expanded { Icon::new(IconName::FolderOpen).text_color(cx.theme().primary) } else { Icon::from(IconName::Folder).text_color(cx.theme().primary) }
             }
             Some(DbNodeType::Table) => Icon::from(IconName::Table).text_color(cx.theme().primary),
@@ -387,6 +397,7 @@ impl DbTreeView {
             Some(DbNodeType::Index) => Icon::from(IconName::Settings),
             Some(DbNodeType::Trigger) => Icon::from(IconName::Settings),
             Some(DbNodeType::Sequence) => Icon::from(IconName::ArrowRight),
+            Some(DbNodeType::NamedQuery) => Icon::from(IconName::File).text_color(cx.theme().primary),
             _ => Icon::from(IconName::File),
         }
     }
@@ -412,6 +423,13 @@ impl DbTreeView {
                             node
                         });
                     }
+                }
+                DbNodeType::NamedQuery => {
+                    // 打开命名查询
+                    eprintln!("Opening named query: {}", node.name);
+                    cx.emit(DbTreeViewEvent::OpenNamedQuery {
+                        node
+                    });
                 }
                 DbNodeType::Connection | DbNodeType::Database => {
                     let node_id = item.id.to_string();
@@ -763,7 +781,7 @@ impl Render for DbTreeView {
                                                                 DbNodeType::View => {
                                                                     let node1 = node.clone();
                                                                     let node2 = node.clone();
-                                                                    
+
                                                                     menu = menu
                                                                         .item(
                                                                             PopupMenuItem::new("查看视图数据")
@@ -779,6 +797,61 @@ impl Render for DbTreeView {
                                                                                 .on_click(window.listener_for(&view_clone, move |_this, _, _, cx| {
                                                                                     cx.emit(DbTreeViewEvent::DeleteView {
                                                                                         node: node2.clone()
+                                                                                    });
+                                                                                }))
+                                                                        )
+                                                                        .separator();
+                                                                }
+                                                                DbNodeType::QueriesFolder => {
+                                                                    let node1 = node.clone();
+                                                                    let node2 = node.clone();
+
+                                                                    menu = menu
+                                                                        .item(
+                                                                            PopupMenuItem::new("新建查询")
+                                                                                .on_click(window.listener_for(&view_clone, move |_this, _, _, cx| {
+                                                                                    cx.emit(DbTreeViewEvent::CreateNewQuery {
+                                                                                        node: node1.clone()
+                                                                                    });
+                                                                                }))
+                                                                        )
+                                                                        .separator()
+                                                                        .item(
+                                                                            PopupMenuItem::new("刷新")
+                                                                                .on_click(window.listener_for(&view_clone, move |this, _, _, cx| {
+                                                                                    this.refresh_tree(node2.id.clone(), cx);
+                                                                                }))
+                                                                        )
+                                                                        .separator();
+                                                                }
+                                                                DbNodeType::NamedQuery => {
+                                                                    let node1 = node.clone();
+                                                                    let node2 = node.clone();
+                                                                    let node3 = node.clone();
+
+                                                                    menu = menu
+                                                                        .item(
+                                                                            PopupMenuItem::new("打开查询")
+                                                                                .on_click(window.listener_for(&view_clone, move |_this, _, _, cx| {
+                                                                                    cx.emit(DbTreeViewEvent::OpenNamedQuery {
+                                                                                        node: node1.clone()
+                                                                                    });
+                                                                                }))
+                                                                        )
+                                                                        .separator()
+                                                                        .item(
+                                                                            PopupMenuItem::new("重命名查询")
+                                                                                .on_click(window.listener_for(&view_clone, move |_this, _, _, cx| {
+                                                                                    cx.emit(DbTreeViewEvent::RenameQuery {
+                                                                                        node: node2.clone()
+                                                                                    });
+                                                                                }))
+                                                                        )
+                                                                        .item(
+                                                                            PopupMenuItem::new("删除查询")
+                                                                                .on_click(window.listener_for(&view_clone, move |_this, _, _, cx| {
+                                                                                    cx.emit(DbTreeViewEvent::DeleteQuery {
+                                                                                        node: node3.clone()
                                                                                     });
                                                                                 }))
                                                                         )

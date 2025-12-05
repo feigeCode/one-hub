@@ -2,9 +2,10 @@ use std::collections::HashMap;
 use crate::connection::{DbConnection, DbError};
 use crate::executor::{ExecOptions, SqlResult};
 use crate::types::*;
-use anyhow::Result;
+use anyhow::{Error, Result};
 use async_trait::async_trait;
-use one_core::storage::{DatabaseType, DbConnectionConfig};
+use one_core::storage::{DatabaseType, DbConnectionConfig, GlobalStorageState};
+use one_core::storage::query_repository::QueryRepository;
 
 /// Database plugin trait for supporting multiple database types
 #[async_trait]
@@ -103,7 +104,7 @@ pub trait DatabasePlugin: Send + Sync {
     }
 
     // === Tree Building ===
-    async fn build_database_tree(&self, connection: &dyn DbConnection, node: &DbNode) -> Result<Vec<DbNode>> {
+    async fn build_database_tree(&self, connection: &dyn DbConnection, node: &DbNode, global_storage_state: &GlobalStorageState) -> Result<Vec<DbNode>> {
         let mut nodes = Vec::new();
         let database = &node.name;
         let id = &node.id;
@@ -187,10 +188,95 @@ pub trait DatabasePlugin: Send + Sync {
             nodes.push(views_folder);
         }
 
+        // Load queries folder
+        let queries_folder = self.load_queries(&node, global_storage_state).await?;
+        nodes.push(queries_folder);
+
         Ok(nodes)
     }
 
-    async fn load_node_children(&self, connection: &dyn DbConnection, node: &DbNode) -> Result<Vec<DbNode>> {
+    async fn load_queries(&self, node: &DbNode, global_storage_state: &GlobalStorageState) -> std::result::Result<DbNode, Error> {
+        let node_id_for_queries = node.id.clone();
+        let connection_id_for_queries = node.connection_id.clone();
+        let database_name = node.name.clone();  // Database node's name is the database name
+
+        // 获取当前连接的信息
+        let conn_repo_arc = global_storage_state.storage.get::<QueryRepository>().await;
+        if  let Some(conn_repo) = conn_repo_arc {
+            let pool = global_storage_state.storage.get_pool().await;
+            return match pool {
+                Ok(p) => {
+                    let query_repo = (*conn_repo).clone();
+                    let queries = query_repo.list_by_connection(&p, &connection_id_for_queries).await.unwrap_or_default();
+                    // Create QueriesFolder node
+                    let query_count = queries.len();
+
+                    // Add database name to metadata
+                    let mut metadata = HashMap::new();
+                    metadata.insert("database".to_string(), database_name.clone());
+
+                    let queries_folder_node = DbNode::new(
+                        format!("{}:queries_folder", &node_id_for_queries),
+                        format!("Queries ({})", query_count),
+                        DbNodeType::QueriesFolder,
+                        connection_id_for_queries.clone()
+                    )
+                        .with_parent_context(node_id_for_queries.clone())
+                        .with_metadata(metadata.clone());
+
+                    if !queries.is_empty() {
+                        // Add NamedQuery children
+                        let mut query_nodes = Vec::new();
+                        for query in queries {
+                            let mut query_node = DbNode::new(
+                                format!("{}:queries_folder:{}", &node_id_for_queries, query.id.unwrap_or(0)),
+                                query.name.clone(),
+                                DbNodeType::NamedQuery,
+                                connection_id_for_queries.clone()
+                            )
+                                .with_parent_context(format!("{}:queries_folder", &node_id_for_queries));
+
+                            // Add query_id to metadata
+                            if let Some(qid) = query.id {
+                                query_node.metadata.get_or_insert_with(Default::default).insert("query_id".to_string(), qid.to_string());
+                            }
+
+                            query_nodes.push(query_node);
+                        }
+
+                        let mut queries_folder_node = queries_folder_node;
+                        queries_folder_node.children = query_nodes;
+                        queries_folder_node.has_children = true;
+                        queries_folder_node.children_loaded = true;
+                        Ok(queries_folder_node)
+                    } else {
+                        // Add empty QueriesFolder node
+                        Ok(queries_folder_node)
+                    }
+                }
+                Err(e) => {
+                    Err(e)
+                }
+            }
+
+        }
+
+        // Add database name to metadata
+        let mut metadata = HashMap::new();
+        metadata.insert("database".to_string(), database_name.clone());
+
+        let queries_folder_node = DbNode::new(
+            format!("{}:queries_folder", &node_id_for_queries),
+            format!("Queries ({})", 0),
+            DbNodeType::QueriesFolder,
+            connection_id_for_queries.clone()
+        )
+            .with_parent_context(node_id_for_queries.clone())
+            .with_metadata(metadata);
+        Ok(queries_folder_node)
+    }
+
+    async fn load_node_children(&self, connection: &dyn DbConnection, node: &DbNode, global_storage_state: &GlobalStorageState) -> Result<Vec<DbNode>> {
         let id = &node.id;
         match node.node_type {
             DbNodeType::Connection => {
@@ -205,11 +291,12 @@ pub trait DatabasePlugin: Send + Sync {
                     .collect())
             }
             DbNodeType::Database => {
-                self.build_database_tree(connection, node).await
+                self.build_database_tree(connection, node, global_storage_state).await
             }
             DbNodeType::TablesFolder | DbNodeType::ViewsFolder |
             DbNodeType::FunctionsFolder | DbNodeType::ProceduresFolder |
-            DbNodeType::TriggersFolder | DbNodeType::SequencesFolder => {
+            DbNodeType::TriggersFolder | DbNodeType::SequencesFolder |
+            DbNodeType::QueriesFolder => {
                 if node.children_loaded {
                     Ok(node.children.clone())
                 } else {

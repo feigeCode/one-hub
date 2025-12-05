@@ -3,7 +3,8 @@ use std::any::Any;
 use db::{DbNode, DbNodeType, GlobalDbState};
 use gpui::{div, px, prelude::FluentBuilder, AnyElement, App, AppContext, Context, Entity, FontWeight, Hsla, IntoElement, ParentElement, SharedString, Styled, Subscription, Window};
 use gpui_component::{button::ButtonVariants, h_flex, resizable::{h_resizable, resizable_panel}, v_flex, ActiveTheme, IconName, WindowExt};
-use one_core::{gpui_tokio::Tokio, storage::StoredConnection, tab_container::{TabContainer, TabContent, TabContentType, TabItem}};
+use crate::sql_editor_view::SqlEditorTabContent;
+use one_core::{gpui_tokio::Tokio, storage::{StoredConnection, query_repository::QueryRepository}, tab_container::{TabContainer, TabContent, TabContentType, TabItem}};
 use uuid::Uuid;
 
 // 字符集选择项
@@ -86,7 +87,7 @@ impl DatabaseEventHandler {
                     Self::handle_node_selected(node.clone(), global_state, objects_panel, cx);
                 }
                 DbTreeViewEvent::CreateNewQuery { node } => {
-                    Self::handle_create_new_query(node.clone(), tab_container, window, cx);
+                    Self::handle_create_new_query(node.clone(), tab_container, tree_view.clone(), window, cx);
                 }
                 DbTreeViewEvent::OpenTableData { node } => {
                     Self::handle_open_table_data(node.clone(), global_state, tab_container, window, cx);
@@ -132,6 +133,15 @@ impl DatabaseEventHandler {
                 }
                 DbTreeViewEvent::DeleteView { node } => {
                     Self::handle_delete_view(node.clone(), global_state, tree_view.clone(), window, cx);
+                }
+                DbTreeViewEvent::OpenNamedQuery { node } => {
+                    Self::handle_open_named_query(node.clone(), tab_container, window, cx);
+                }
+                DbTreeViewEvent::RenameQuery { node } => {
+                    Self::handle_rename_query(node.clone(), global_state, window, cx);
+                }
+                DbTreeViewEvent::DeleteQuery { node } => {
+                    Self::handle_delete_query(node.clone(), tree_view.clone(), window, cx);
                 }
             }
         });
@@ -212,24 +222,47 @@ impl DatabaseEventHandler {
     fn handle_create_new_query(
         node: DbNode,
         tab_container: Entity<TabContainer>,
+        db_tree_view: Entity<DbTreeView>,
         window: &mut Window,
         cx: &mut App,
     ) {
         use crate::sql_editor_view::SqlEditorTabContent;
 
         let connection_id = node.connection_id.clone();
-        // 获取数据库名：如果是数据库节点则用 name，否则用 parent_context
-        let database = node.name.clone();
+
+        // 获取数据库名：
+        // 1. 如果是数据库节点，直接使用 node.name
+        // 2. 如果是 QueriesFolder 或其他节点，从 metadata 中获取 database
+        // 3. 如果 metadata 没有，尝试从 parent_context 解析
+        let database = if node.node_type == db::DbNodeType::Database {
+            node.name.clone()
+        } else if let Some(metadata) = &node.metadata {
+            metadata.get("database").cloned().unwrap_or_else(|| {
+                // 从 parent_context 解析数据库名
+                // parent_context 格式: "connection_id:database_name"
+                if let Some(parent) = &node.parent_context {
+                    parent.split(':').nth(1).unwrap_or("").to_string()
+                } else {
+                    "".to_string()
+                }
+            })
+        } else if let Some(parent) = &node.parent_context {
+            // 从 parent_context 解析数据库名
+            parent.split(':').nth(1).unwrap_or("").to_string()
+        } else {
+            "".to_string()
+        };
+
         let sql_editor = SqlEditorTabContent::new_with_config(
-            format!("{} - Query", database),
+            format!("{} - Query", if database.is_empty() { "New Query" } else { &database }),
             connection_id,
-            Some(database.clone()),
+            if database.is_empty() { None } else { Some(database.clone()) },
             window,
             cx,
         );
 
         tab_container.update(cx, |container, cx| {
-            let tab_id = format!("query-{}-{}", database, Uuid::new_v4());
+            let tab_id = format!("query-{}-{}", if database.is_empty() { "new" } else { &database }, Uuid::new_v4());
             let tab = TabItem::new(tab_id, sql_editor);
             container.add_and_activate_tab(tab, cx);
         });
@@ -977,6 +1010,114 @@ impl DatabaseEventHandler {
                     true
                 })
         });
+    }
+
+    /// 处理打开命名查询事件
+    fn handle_open_named_query(
+        node: DbNode,
+        tab_container: Entity<TabContainer>,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let query_id = node.metadata.as_ref()
+            .and_then(|m| m.get("query_id"))
+            .and_then(|id| id.parse::<i64>().ok());
+
+        if let Some(qid) = query_id {
+            let connection_id = node.connection_id.clone();
+            let query_name = node.name.clone();
+            let tab_id = format!("query-{}", qid);
+
+            tab_container.update(cx, |container, cx| {
+                container.activate_or_add_tab_lazy(
+                    tab_id.clone(),
+                    move |window, cx| {
+                        let sql_editor = SqlEditorTabContent::new_with_query_id(
+                            qid,
+                            query_name.clone(),
+                            connection_id.clone(),
+                            window,
+                            cx,
+                        );
+                        TabItem::new(tab_id.clone(), sql_editor)
+                    },
+                    window,
+                    cx,
+                );
+            });
+        }
+    }
+
+    /// 处理重命名查询事件
+    fn handle_rename_query(
+        node: DbNode,
+        _global_state: GlobalDbState,
+        _window: &mut Window,
+        _cx: &mut App,
+    ) {
+        eprintln!("Rename query: {}", node.name);
+        // TODO: 实现重命名查询对话框
+    }
+
+    /// 处理删除查询事件
+    fn handle_delete_query(
+        node: DbNode,
+        tree_view: Entity<DbTreeView>,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        use one_core::storage::traits::Repository;
+        use one_core::storage::{GlobalStorageState, query_repository::QueryRepository};
+
+        let query_id = node.metadata.as_ref()
+            .and_then(|m| m.get("query_id"))
+            .and_then(|id| id.parse::<i64>().ok());
+
+        if let Some(qid) = query_id {
+            let query_name = node.name.clone();
+            let connection_id = node.connection_id.clone();
+            let storage_manager = cx.global::<GlobalStorageState>().storage.clone();
+
+            window.open_dialog(cx, move |dialog, _window, _cx| {
+                let q_name = query_name.clone();
+                let storage = storage_manager.clone();
+                let tree = tree_view.clone();
+                let conn_id = connection_id.clone();
+                
+                dialog
+                    .title("确认删除")
+                    .confirm()
+                    .child(
+                        v_flex()
+                            .gap_2()
+                            .child(format!("确定要删除查询 \"{}\" 吗？", q_name))
+                            .child("此操作不可恢复。")
+                    )
+                    .on_ok(move |_, _, cx| {
+                        let storage = storage.clone();
+                        let tree = tree.clone();
+                        let conn_id = conn_id.clone();
+                        
+                        cx.spawn(async move |cx| {
+                            if let Ok(pool) = storage.get_pool().await {
+                                if let Some(query_repo_arc) = storage.get::<QueryRepository>().await {
+                                    let query_repo = (*query_repo_arc).clone();
+                                    let _ = query_repo.delete(&pool, qid).await;
+                                    eprintln!("Query deleted: {}", qid);
+                                    
+                                    // 刷新树
+                                    let _ = cx.update(|cx| {
+                                        tree.update(cx, |tree, cx| {
+                                            tree.refresh_tree(conn_id.clone(), cx);
+                                        });
+                                    });
+                                }
+                            }
+                        }).detach();
+                        true
+                    })
+            });
+        }
     }
 }
 
