@@ -351,13 +351,24 @@ impl RenderOnce for ContextMenuTree {
                             // 组合缩进、箭头和内容
                             let el = div()
                                 .id(ix)
+                                .w_full()
+                                .overflow_hidden()
                                 .child(
                                     h_flex()
+                                        .w_full()
+                                        .min_w(px(0.))
+                                        .overflow_hidden()
                                         .gap_1()
                                         .items_center()
                                         .pl(indent)  // 添加层级缩进
                                         .child(arrow)
-                                        .child(item_content)
+                                        .child(
+                                            div()
+                                                .flex_1()
+                                                .min_w(px(0.))
+                                                .overflow_hidden()
+                                                .child(item_content)
+                                        )
                                 )
                                 .when(!entry.item.is_disabled(), |this| {
                                     this.on_mouse_down(MouseButton::Left, {

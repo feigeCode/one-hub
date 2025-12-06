@@ -98,9 +98,13 @@ impl DatabaseObjectsPanel {
                     }
                     plugin.list_tables_view(&**conn, database).await.ok()
                 }
-                DbNodeType::Table => {
+                DbNodeType::Table | DbNodeType::ColumnsFolder => {
                     let database = node.metadata.as_ref()?.get("database")?;
-                    plugin.list_columns_view(&**conn, database, &node.name).await.ok()
+                    let mut table = &node.name;
+                    if node.metadata.is_some() {
+                        table = node.metadata.as_ref()?.get("table").or(Some(&node.name))?;
+                    }
+                    plugin.list_columns_view(&**conn, database, table).await.ok()
                 }
                 DbNodeType::ViewsFolder => {
                     let database = node.metadata.as_ref()?.get("database").or(Some(&node.name))?;

@@ -307,6 +307,11 @@ pub trait DatabasePlugin: Send + Sync {
                 let metadata = node.metadata.as_ref().unwrap();
                 let db = metadata.get("database").unwrap();
                 let table = &node.name;
+                let mut folder_metadata = HashMap::new();
+                folder_metadata.insert("table".to_string(), table.clone());
+                metadata.iter().for_each(|(k, v)| {
+                    folder_metadata.insert(k.clone(), v.clone());
+                });
                 let mut children = Vec::new();
 
                 // Columns folder
@@ -317,30 +322,27 @@ pub trait DatabasePlugin: Send + Sync {
                     format!("Columns ({})", column_count),
                     DbNodeType::ColumnsFolder,
                     node.connection_id.clone()
-                ).with_parent_context(id);
+                ).with_parent_context(id)
+                    .with_metadata(folder_metadata.clone());
 
                 if column_count > 0 {
                     let column_nodes: Vec<DbNode> = columns
                         .into_iter()
                         .map(|col| {
-                            let mut meta_str = col.data_type.clone();
-                            if !col.is_nullable {
-                                meta_str.push_str(" NOT NULL");
-                            }
-                            if col.is_primary_key {
-                                meta_str.push_str(" PRIMARY KEY");
-                            }
-                            
-                            let mut metadata = HashMap::new();
-                            metadata.insert("type".to_string(), meta_str);
-
+                            let mut column_metadata = HashMap::new();
+                            folder_metadata.iter().for_each(|(k, v)| {
+                                column_metadata.insert(k.clone(), v.clone());
+                            });
+                            column_metadata.insert("type".to_string(),col.data_type);
+                            column_metadata.insert("is_nullable".to_string(), col.is_nullable.to_string());
+                            column_metadata.insert("is_primary_key".to_string(), col.is_primary_key.to_string());
                             DbNode::new(
                                 format!("{}:columns_folder:{}", id, col.name),
                                 col.name,
                                 DbNodeType::Column,
                                 node.connection_id.clone()
                             )
-                            .with_metadata(metadata)
+                            .with_metadata(column_metadata)
                             .with_parent_context(format!("{}:columns_folder", id))
                         })
                         .collect();
@@ -359,21 +361,19 @@ pub trait DatabasePlugin: Send + Sync {
                     format!("Indexes ({})", index_count),
                     DbNodeType::IndexesFolder,
                     node.connection_id.clone()
-                ).with_parent_context(id);
+                ).with_parent_context(id)
+                .with_metadata(folder_metadata.clone());
 
                 if index_count > 0 {
                     let index_nodes: Vec<DbNode> = indexes
                         .into_iter()
                         .map(|idx| {
-                            let meta_str = format!(
-                                "{} ({})",
-                                if idx.is_unique { "UNIQUE" } else { "INDEX" },
-                                idx.columns.join(", ")
-                            );
-                            
                             let mut metadata = HashMap::new();
-                            metadata.insert("type".to_string(), meta_str);
-
+                            folder_metadata.iter().for_each(|(k, v)| {
+                                metadata.insert(k.clone(), v.clone());
+                            });
+                            metadata.insert("unique".to_string(), idx.is_unique.to_string());
+                            metadata.insert("columns".to_string(), idx.columns.join(", "));
                             DbNode::new(
                                 format!("{}:indexes_folder:{}", id, idx.name),
                                 idx.name,
