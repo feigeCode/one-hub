@@ -1,7 +1,7 @@
 use std::any::Any;
 
 use anyhow::Error;
-use gpui::{div, px, AnyElement, App, AppContext, Context, ElementId, Entity, FocusHandle, Focusable, FontWeight, Hsla, InteractiveElement, IntoElement, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Window};
+use gpui::{div, px, AnyElement, App, AppContext, Context, ElementId, Entity, FontWeight, InteractiveElement, IntoElement, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Window};
 use gpui::prelude::FluentBuilder;
 use gpui_component::{button::{Button, ButtonVariants as _}, h_flex, input::{Input, InputEvent, InputState}, menu::PopupMenuItem, v_flex, ActiveTheme, Disableable, Icon, IconName, InteractiveElementExt, Selectable, Sizable, Size, ThemeMode, WindowExt};
 
@@ -29,64 +29,6 @@ pub struct HomePage {
     editing_connection_id: Option<i64>,
     selected_connection_id: Option<i64>,
     editing_workspace_id: Option<i64>,
-}
-
-// 工作区表单组件
-struct WorkspaceForm {
-    focus_handle: FocusHandle,
-    name_input: Entity<InputState>,
-}
-
-impl WorkspaceForm {
-    fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let focus_handle = cx.focus_handle();
-        let name_input = cx.new(|cx| {
-            InputState::new(window, cx).placeholder("工作区名称")
-        });
-        
-        Self { 
-            focus_handle, 
-            name_input,
-        }
-    }
-    
-    fn with_workspace(workspace: &Workspace, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let focus_handle = cx.focus_handle();
-        let name_input = cx.new(|cx| {
-            let mut input_state = InputState::new(window, cx).placeholder("工作区名称");
-            input_state.set_value(workspace.name.clone(), window, cx);
-            input_state
-        });
-        
-        Self { 
-            focus_handle, 
-            name_input,
-        }
-    }
-}
-
-impl Focusable for WorkspaceForm {
-    fn focus_handle(&self, _cx: &App) -> FocusHandle {
-        self.focus_handle.clone()
-    }
-}
-
-impl gpui::Render for WorkspaceForm {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        v_flex()
-            .gap_3()
-            .child(
-                v_flex()
-                    .gap_2()
-                    .child(
-                        div()
-                            .text_sm()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child("工作区名称")
-                    )
-                    .child(Input::new(&self.name_input).w_full())
-            )
-    }
 }
 
 impl HomePage {
@@ -196,30 +138,31 @@ impl HomePage {
         let workspace_data = workspace_id.and_then(|id| {
             self.workspaces.iter().find(|w| w.id == Some(id)).cloned()
         });
-        
         self.editing_workspace_id = workspace_id;
-        
         let view = cx.entity().clone();
         let is_editing = workspace_id.is_some();
-        
-        window.open_dialog(cx, move |dialog, window, cx| {
-            let form = if let Some(ref workspace) = workspace_data {
-                cx.new(|cx| WorkspaceForm::with_workspace(workspace, window, cx))
-            } else {
-                cx.new(|cx| WorkspaceForm::new(window, cx))
-            };
-            
+        let form = cx.new(|cx| {
+            let mut input_state = InputState::new(window, cx).placeholder("工作区名称");
+            if let Some(ref workspace) = workspace_data {
+                input_state.set_value(workspace.name.clone(), window, cx);
+            }
+            input_state
+        });
+
+
+        window.open_dialog(cx, move |dialog, _window, _cx| {
             let form_clone = form.clone();
             let view_clone = view.clone();
             let view_clone2 = view.clone();
-            
             dialog
                 .title(if is_editing { "编辑工作区" } else { "新建工作区" })
                 .w(px(400.0))
-                .child(form)
+                .child(
+                    Input::new(&form).size_full()
+                )
                 .confirm()
                 .on_ok(move |_, _window, cx| {
-                    let name = form_clone.read(cx).name_input.read(cx).text().to_string();
+                    let name = form_clone.read(cx).text().to_string();
                     if !name.is_empty() {
                         let _ = view_clone.update(cx, |this, cx| {
                             this.handle_save_workspace(name, cx);
@@ -368,7 +311,7 @@ impl HomePage {
             dialog
                 .title(title_shared.clone())
                 .w(px(600.0))
-                .h(px(500.0))
+                .h(px(550.0))
                 .child(form_clone.clone())
                 .close_button(true)
                 .footer(move |_ok_btn, cancel_btn, window, cx| {
@@ -518,8 +461,13 @@ impl HomePage {
 
     pub fn add_settings_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.tab_container.update(cx, |tc, cx| {
-            tc.activate_or_add_tab_lazy("settings", |_, _| {
-                TabItem::new("settings", SettingsTabContent::new())
+            tc.activate_or_add_tab_lazy("settings", |_, cx| {
+                // Get LLM store from global state
+                let store = {
+                    let llm_state = cx.global::<one_core::llm::GlobalLlmState>();
+                    llm_state.store.clone()
+                };
+                TabItem::new("settings", SettingsTabContent::new(store))
             }, window, cx);
         });
     }
@@ -550,6 +498,7 @@ impl HomePage {
             .p_4()
             .border_b_1()
             .border_color(cx.theme().border)
+            .bg(cx.theme().primary_foreground)
             .justify_between()
             .items_center()
             .child(
@@ -559,8 +508,10 @@ impl HomePage {
                         Button::new("new-connect-button")
                             .icon(IconName::Plus)
                             .with_size(Size::Large)
+                            .tooltip("新建连接")
                             .dropdown_menu(move |menu, window, _cx| {
-                                menu.item(
+                                menu.min_w(px(200.))
+                                    .item(
                                     PopupMenuItem::new("工作区")
                                                 .icon(IconName::Apps)
                                                 .on_click(window.listener_for(&view, move |this, _, window, cx| {
@@ -568,14 +519,14 @@ impl HomePage {
                                                 }))
                                 ).item(
                                     PopupMenuItem::new("MySQL")
-                                        .icon(IconName::Database)
+                                        .icon(Icon::from(IconName::MySQLLineColor))
                                         .on_click(window.listener_for(&view, move |this, _, window, cx| {
                                             this.editing_connection_id = None;
                                             this.show_connection_form(DatabaseType::MySQL, window, cx);
                                         }))
                                 ).item(
                                     PopupMenuItem::new("PostgreSQL")
-                                        .icon(IconName::Database)
+                                        .icon(Icon::from(IconName::MySQLLineColor))
                                         .on_click(window.listener_for(&view, move |this, _, window, cx| {
                                             this.editing_connection_id = None;
                                             this.show_connection_form(DatabaseType::PostgreSQL, window, cx);
@@ -587,7 +538,7 @@ impl HomePage {
                         this.child(
                             Button::new("edit-selected")
                                 .icon(IconName::Settings)
-                                .label("编辑")
+                                .tooltip("编辑连接")
                                 .with_size(Size::Medium)
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     if let Some(conn_id) = this.selected_connection_id {
@@ -622,7 +573,7 @@ impl HomePage {
         v_flex()
             .w(px(200.0))
             .h_full()
-            .bg(cx.theme().muted)
+            .bg(cx.theme().background)
             .border_r_1()
             .border_color(cx.theme().border)
             .child(
@@ -737,12 +688,12 @@ impl HomePage {
         // 分组：工作区和未分配连接
         let workspaces_with_connections: Vec<_> = self.workspaces.iter()
             .map(|ws| {
-                let conns: Vec<_> = self.connections.iter()
+                let conn_list: Vec<_> = self.connections.iter()
                     .filter(|conn| conn.workspace_id == ws.id)
                     .filter(|conn| self.match_connection(conn, &search_query))
                     .cloned()
                     .collect();
-                (ws.clone(), conns)
+                (ws.clone(), conn_list)
             })
             .collect();
 
@@ -753,12 +704,6 @@ impl HomePage {
             .collect();
 
         let selected_id = self.selected_connection_id;
-        let theme = cx.theme();
-        let accent_color = theme.accent;
-        let muted_color = theme.muted;
-        let border_color = theme.border;
-        let bg_color = theme.background;
-
         div()
             .id("home-content")
             .size_full()
@@ -772,14 +717,14 @@ impl HomePage {
                 // 工作区列表
                 for (workspace, connections) in workspaces_with_connections {
                     container = container.child(
-                        self.render_workspace_section(workspace, connections, selected_id, accent_color, muted_color, border_color, bg_color, cx)
+                        self.render_workspace_section(workspace, connections, selected_id, cx)
                     );
                 }
                 
                 // 未分配连接
                 if !unassigned_connections.is_empty() {
                     container = container.child(
-                        self.render_unassigned_section(unassigned_connections, selected_id, accent_color, muted_color, border_color, bg_color, cx)
+                        self.render_unassigned_section(unassigned_connections, selected_id, cx)
                     );
                 }
                 
@@ -818,10 +763,6 @@ impl HomePage {
         workspace: Workspace,
         connections: Vec<StoredConnection>,
         selected_id: Option<i64>,
-        accent_color: Hsla,
-        muted_color: Hsla,
-        border_color: Hsla,
-        bg_color: Hsla,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let workspace_id = workspace.id;
@@ -836,9 +777,9 @@ impl HomePage {
                     .px_2()
                     .py_1()
                     .rounded(px(6.0))
-                    .bg(muted_color)
+                    .bg(cx.theme().muted)
                     .cursor_pointer()
-                    .hover(|style| style.bg(accent_color.opacity(0.1)))
+                    .hover(|style| style.bg(cx.theme().accent.opacity(0.1)))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         if let Some(ws_id) = workspace_id {
                             this.open_workspace_tab(ws_id, workspace_name.clone(), window, cx);
@@ -888,7 +829,7 @@ impl HomePage {
                 
                 for conn in connections {
                     grid = grid.child(
-                        self.render_connection_card(conn, selected_id, accent_color, muted_color, border_color, bg_color, cx)
+                        self.render_connection_card(conn, selected_id, cx)
                     );
                 }
                 
@@ -900,10 +841,6 @@ impl HomePage {
         &self,
         connections: Vec<StoredConnection>,
         selected_id: Option<i64>,
-        accent_color: Hsla,
-        muted_color: Hsla,
-        border_color: Hsla,
-        bg_color: Hsla,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         v_flex()
@@ -936,7 +873,7 @@ impl HomePage {
                 
                 for conn in connections {
                     grid = grid.child(
-                        self.render_connection_card(conn, selected_id, accent_color, muted_color, border_color, bg_color, cx)
+                        self.render_connection_card(conn, selected_id, cx)
                     );
                 }
                 
@@ -948,10 +885,6 @@ impl HomePage {
         &self,
         conn: StoredConnection,
         selected_id: Option<i64>,
-        accent_color: Hsla,
-        muted_color: Hsla,
-        border_color: Hsla,
-        bg_color: Hsla,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let conn_id = conn.id;
@@ -962,20 +895,20 @@ impl HomePage {
             .id(SharedString::from(format!("conn-card-{}", conn.id.unwrap_or(0))))
             .w_full()
             .rounded(px(8.0))
-            .bg(bg_color)
+            .bg(cx.theme().primary_foreground)
             .border_1()
             .when(is_selected, |this| {
-                this.border_color(accent_color)
-                    .bg(muted_color)
+                this.border_color(cx.theme().primary)
+                    .bg(cx.theme().primary_foreground)
             })
             .when(!is_selected, |this| {
-                this.border_color(border_color)
+                this.border_color(cx.theme().border)
             })
             .cursor_pointer()
             .hover(|style| {
                 style
-                    .bg(muted_color)
-                    .border_color(accent_color)
+                    .bg(cx.theme().primary_foreground)
+                    .border_color(cx.theme().primary)
             })
             .on_double_click(cx.listener(move |this, _, w, cx| {
                 this.add_item_to_tab(&clone_conn, w, cx);
@@ -1045,38 +978,12 @@ impl HomePage {
                                             })
                                     )
                             )
-                            .child(
-                                div()
-                                    .px_2()
-                                    .py_0p5()
-                                    .rounded(px(12.0))
-                                    .bg(gpui::rgb(0xFFF4E5))
-                                    .flex_shrink_0()
-                                    .child(
-                                        h_flex()
-                                            .items_center()
-                                            .gap_1()
-                                            .child(
-                                                div()
-                                                    .w(px(6.0))
-                                                    .h(px(6.0))
-                                                    .rounded(px(3.0))
-                                                    .bg(gpui::rgb(0xFF9800))
-                                            )
-                                            .child(
-                                                div()
-                                                    .text_xs()
-                                                    .text_color(gpui::rgb(0xFF9800))
-                                                    .child("连接中")
-                                            )
-                                    )
-                            )
                     )
                     .child(
                         div()
                             .w_full()
                             .h(px(1.0))
-                            .bg(border_color)
+                            .bg(cx.theme().border)
                     )
                     .child(
                         div()
@@ -1112,6 +1019,7 @@ impl Render for HomePage {
                             .flex_1()
                             .w_full()
                             .overflow_hidden()
+                            .bg(cx.theme().muted)
                             .child(self.render_content_area(cx))
                     )
             )

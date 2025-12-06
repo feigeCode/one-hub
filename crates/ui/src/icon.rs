@@ -198,7 +198,7 @@ impl IconName {
             Self::WindowMaximize => "icons/window-maximize.svg",
             Self::WindowMinimize => "icons/window-minimize.svg",
             Self::WindowRestore => "icons/window-restore.svg",
-            Self::Database => "icons/database.svg",
+            Self::Database => "icons/db.svg",
             Self::Table => "icons/table.svg",
             Self::Column => "icons/column.svg",
             Self::Key => "icons/key.svg",

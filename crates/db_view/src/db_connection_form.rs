@@ -1,12 +1,11 @@
-use gpui::{div, px, prelude::*, App, AppContext, Axis, ClickEvent, Context, Entity, EventEmitter, FocusHandle, Focusable, IntoElement, ParentElement, Render, SharedString, Styled, Window};
+use gpui::{div, prelude::*, px, App, AppContext, Axis, Context, Entity, EventEmitter, FocusHandle, Focusable, IntoElement, ParentElement, Render, SharedString, Styled, Window};
 use gpui_component::{
-    button::{Button, ButtonVariants as _},
-    form::{field, v_form},
-    h_flex,
+    form::{field, v_form}
+    ,
     input::{Input, InputEvent, InputState},
     select::{Select, SelectItem, SelectState},
     tab::{Tab, TabBar},
-    v_flex, ActiveTheme, Disableable, Sizable, Size, StyledExt,
+    v_flex, ActiveTheme, Sizable, Size,
 };
 use one_core::storage::{DatabaseType, DbConnectionConfig, StoredConnection, Workspace};
 
@@ -162,7 +161,6 @@ impl DbFormConfig {
                 TabGroup::new("advanced", "高级"),
                 TabGroup::new("ssl", "SSL"),
                 TabGroup::new("ssh", "SSH"),
-                TabGroup::new("http", "HTTP"),
                 TabGroup::new("notes", "备注"),
             ],
         }
@@ -196,7 +194,6 @@ impl DbFormConfig {
                 TabGroup::new("advanced", "高级"),
                 TabGroup::new("ssl", "SSL"),
                 TabGroup::new("ssh", "SSH"),
-                TabGroup::new("http", "HTTP"),
                 TabGroup::new("notes", "备注"),
             ],
         }
@@ -451,7 +448,6 @@ impl Focusable for DbConnectionForm {
 
 impl Render for DbConnectionForm {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let is_testing = *self.is_testing.read(cx);
         let test_result_msg = self.test_result.read(cx).as_ref().map(|r| match r {
             Ok(true) => "✓ 连接成功!".to_string(),
             Ok(false) => "✗ 连接失败".to_string(),
